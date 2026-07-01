@@ -23,31 +23,35 @@ litellm.disable_aiohttp_transport = True
 # 两者都是英文枚举(稳定机器键)，展示时再映射成中文。
 # ============================================================
 SOURCE_TYPES = [
-    "owned",                  # 自有/官方发布物(官网、官方博客、官方账号)
+    # "owned",                  # 自有/官方发布物(官网、官方博客、官方账号)
     "social",                 # 社媒/SOCMINT
+    "community",              # 社区/论坛/Q&A/评论
     "news_media",             # 新闻媒体/编辑内容
     "community_ugc",          # 用户生成内容(论坛/评论/Q&A/对比帖)
     "marketplace_directory",  # 交易/名录(B2B平台、电商、企业黄页、供应商目录)
-    "reference",              # 参考/数据库(维基、企业信息库、行业百科)
+    # "reference",              # 参考/数据库(维基、企业信息库、行业百科)
     "public_record",          # 公开记录/监管(工商注册、专利、法律、招投标)
-    "recruitment",            # 招聘
+    # "recruitment",            # 招聘
     "academic_technical",     # 学术/技术(论文、技术文档、标准、白皮书)
+    "event",                  # 展会/会议
     "other",                  # 其他
     "irrelevant",             # 同名无关
 ]
 
 SOURCE_TYPE_LABELS = {
-    "owned": "自有/官方",
-    "social": "社媒",
-    "news_media": "新闻媒体",
-    "community_ugc": "社区/UGC",
-    "marketplace_directory": "交易/名录",
-    "reference": "参考/数据库",
-    "public_record": "公开记录/监管",
-    "recruitment": "招聘",
-    "academic_technical": "学术/技术",
+    # "owned": "自有/官方发布物",
+    "social": "社媒/SOCMINT",
+    "community": "社区/论坛/Q&A/评论",
+    "news_media": "新闻媒体/编辑内容",
+    "community_ugc": "用户生成内容(论坛/评论/Q&A/对比帖)",
+    "marketplace_directory": "交易/名录(B2B平台、电商、企业黄页、供应商目录)",
+    # "reference": "参考/数据库(维基、企业信息库、行业百科)",
+    "public_record": "公开记录/监管(工商注册、专利、法律、招投标)",
+    # "recruitment": "招聘",
+    "academic_technical": "学术/技术(论文、技术文档、标准、白皮书)",
+    "event": "展会/会议",
     "other": "其他",
-    "irrelevant": "无关",
+    "irrelevant": "同名无关",
 }
 
 OWNERSHIP_TYPES = ["first_party", "third_party", "unknown"]

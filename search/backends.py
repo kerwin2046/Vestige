@@ -3,13 +3,14 @@
 可插拔检索后端 (Pluggable Search Backends)。
 
 上层 BFS / 消歧逻辑只依赖统一接口 SearchBackend.search()，
-因此可以在 SearXNG / DDG / Brave API 之间自由切换而不动上层代码。
+因此可以在 SearXNG / DDG / Brave / Exa API 之间自由切换而不动上层代码。
 
 所有后端共享一个限流器(AsyncThrottle)：并发上限 + 请求最小间隔，
 用来避免“单 IP 高频”触发上游引擎的限流/CAPTCHA。
 """
 import asyncio
 import os
+import re
 from abc import ABC, abstractmethod
 
 import httpx
@@ -71,9 +72,10 @@ class SearxngBackend(SearchBackend):
 
     name = "searxng"
 
-    def __init__(self, throttle: AsyncThrottle, base_url: str):
+    def __init__(self, throttle: AsyncThrottle, base_url: str, engines: str = ""):
         super().__init__(throttle)
         self.base_url = base_url
+        self.engines = (engines or "").strip()
 
     async def _search_impl(self, query: str, max_results: int) -> list[dict]:
         params = {
@@ -83,7 +85,9 @@ class SearxngBackend(SearchBackend):
             "language": "all",
             "safesearch": 0,
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        if self.engines:
+            params["engines"] = self.engines
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(self.base_url, params=params, headers={"User-Agent": _UA})
         if resp.status_code != 200:
             print(f"⚠️ [searxng] 状态码 {resp.status_code} query={query!r}")
@@ -187,22 +191,106 @@ class BraveApiBackend(SearchBackend):
         return out
 
 
+_SITE_RE = re.compile(r"site:([^\s\"')]+)", re.I)
+
+
+def _exa_query_params(query: str) -> tuple[str, list[str]]:
+    """把 `site:domain` 语法转为 Exa 的 include_domains + 清理后的 query。"""
+    domains = [d.lower().lstrip(".") for d in _SITE_RE.findall(query)]
+    clean = _SITE_RE.sub("", query)
+    clean = re.sub(r"\s+OR\s+", " ", clean, flags=re.I)
+    clean = re.sub(r"\s{2,}", " ", clean).strip()
+    return clean or query, domains
+
+
+def _exa_snippet(item) -> str:
+    highlights = getattr(item, "highlights", None) or []
+    if highlights:
+        return highlights[0] if isinstance(highlights[0], str) else str(highlights[0])
+    summary = getattr(item, "summary", None) or ""
+    if summary:
+        return summary
+    text = getattr(item, "text", None) or ""
+    return text[:500] if text else ""
+
+
+class ExaBackend(SearchBackend):
+    """
+    Exa Search API — 神经搜索，无 CAPTCHA。
+    文档: https://docs.exa.ai/reference/search-api-guide-for-coding-agents
+    """
+
+    name = "exa"
+
+    def __init__(self, throttle: AsyncThrottle, api_key: str, search_type: str = "auto"):
+        super().__init__(throttle)
+        self.api_key = api_key
+        self.search_type = search_type
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not self.api_key:
+            raise RuntimeError("缺少 EXA_API_KEY，请在 .env 配置后再使用 exa 后端")
+
+        clean_query, include_domains = _exa_query_params(query)
+
+        def _sync():
+            from exa_py import Exa
+
+            exa = Exa(api_key=self.api_key)
+            kwargs: dict = {
+                "type": self.search_type,
+                "num_results": min(max(max_results, 1), 100),
+                "contents": {"highlights": True},
+            }
+            if include_domains:
+                kwargs["include_domains"] = include_domains
+            return exa.search(clean_query, **kwargs)
+
+        response = await asyncio.to_thread(_sync)
+        out = []
+        for item in response.results or []:
+            url = getattr(item, "url", None)
+            if not url:
+                continue
+            out.append(
+                {
+                    "url": url,
+                    "title": getattr(item, "title", "") or "",
+                    "snippet": _exa_snippet(item),
+                    "engine": "exa",
+                }
+            )
+        return out
+
+
 def get_search_backend() -> SearchBackend:
     """根据 config.SEARCH_BACKEND 构造后端实例（每次检索任务用一个，限流器随之共享）。"""
     from config import (
         SEARCH_BACKEND,
         SEARXNG_BASE_URL,
+        SEARXNG_ENGINES,
+        SEARXNG_MAX_CONCURRENCY,
+        SEARXNG_MIN_INTERVAL_SEC,
+        EXA_SEARCH_TYPE,
+        EXA_MAX_CONCURRENCY,
+        EXA_MIN_INTERVAL_SEC,
         SEARCH_MAX_CONCURRENCY,
         SEARCH_MIN_INTERVAL_SEC,
     )
 
-    throttle = AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
     backend = (SEARCH_BACKEND or "searxng").lower()
 
     if backend == "searxng":
-        return SearxngBackend(throttle, SEARXNG_BASE_URL)
+        throttle = AsyncThrottle(SEARXNG_MAX_CONCURRENCY, SEARXNG_MIN_INTERVAL_SEC)
+        return SearxngBackend(throttle, SEARXNG_BASE_URL, SEARXNG_ENGINES)
+
+    if backend == "exa":
+        throttle = AsyncThrottle(EXA_MAX_CONCURRENCY, EXA_MIN_INTERVAL_SEC)
+        return ExaBackend(throttle, os.getenv("EXA_API_KEY", ""), EXA_SEARCH_TYPE)
+
+    throttle = AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
     if backend == "ddg":
         return DdgsBackend(throttle)
     if backend == "brave":
         return BraveApiBackend(throttle, os.getenv("BRAVE_API_KEY", ""))
-    raise ValueError(f"未知的 SEARCH_BACKEND: {SEARCH_BACKEND!r} (可选: searxng/ddg/brave)")
+    raise ValueError(f"未知的 SEARCH_BACKEND: {SEARCH_BACKEND!r} (可选: searxng/ddg/brave/exa)")

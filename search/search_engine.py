@@ -8,11 +8,13 @@ from config import (
     FOCUSED_QUERY_TEMPLATES,
     MAX_BFS_ROUNDS,
     MAX_DOMAINS_PER_ROUND,
+    MAX_MARKETPLACE_DOMAINS_PER_ROUND,
     MAX_TOTAL_DOMAINS_TO_EXPAND,
     DOMAIN_EXPANSION_BLOCKLIST,
     RELEVANCE_THRESHOLD,
 )
 from search.backends import get_search_backend
+from search.denoise import domain_is_marketplace
 
 # 常见的跟踪类查询参数，规范化时去掉，避免同一页面因参数不同被当成不同 URL
 _TRACKING_PARAMS = {
@@ -118,13 +120,21 @@ def _weighted_score(entry: dict) -> float:
     return entry["score"] * _effective_confidence(entry)
 
 
-def _rank_domains(merged: dict, exclude: set[str], limit: int, threshold: float) -> list[str]:
+def _domain_is_marketplace(merged: dict, domain: str) -> bool:
+    """域名是否以名录/聚合为主（由流程数据动态判定，非静态名单）。"""
+    return domain_is_marketplace(merged, domain)
+
+
+def _rank_domains(
+    merged: dict,
+    exclude: set[str],
+    limit: int,
+    threshold: float,
+    max_marketplace: int = MAX_MARKETPLACE_DOMAINS_PER_ROUND,
+) -> list[str]:
     """
-    从当前累加结果里选出最有价值、尚未扩展过的来源域名，构成 BFS 的 frontier。
-    - 跳过 blocklist 与已扩展(exclude)的域名
-    - 置信度门控：一个域名至少要有一条线索的置信度 >= threshold 才允许扩展
-      （避免对同名 App/游戏/无关聚合站越挖越偏）
-    - 按“置信度加权得分”聚合，best-first 取前 limit 个
+    选出最有价值、尚未扩展过的来源域名，构成 BFS frontier。
+    名录站域名每轮最多占 max_marketplace 个名额，其余留给展会/协会/社媒等。
     """
     if limit <= 0:
         return []
@@ -138,9 +148,31 @@ def _rank_domains(merged: dict, exclude: set[str], limit: int, threshold: float)
         if _effective_confidence(entry) >= threshold:
             domain_passes_gate[domain] = True
 
-    eligible = [(d, s) for d, s in domain_scores.items() if domain_passes_gate.get(d, False)]
-    ranked = sorted(eligible, key=lambda kv: kv[1], reverse=True)
-    return [domain for domain, _ in ranked[:limit]]
+    mp: list[tuple[str, float]] = []
+    other: list[tuple[str, float]] = []
+    for d, s in domain_scores.items():
+        if not domain_passes_gate.get(d, False):
+            continue
+        if _domain_is_marketplace(merged, d):
+            mp.append((d, s))
+        else:
+            other.append((d, s))
+    mp.sort(key=lambda x: x[1], reverse=True)
+    other.sort(key=lambda x: x[1], reverse=True)
+
+    picked = [d for d, _ in mp[:max_marketplace]]
+    remain = limit - len(picked)
+    picked.extend(d for d, _ in other[:remain])
+    if len(picked) < limit:
+        extra = limit - len(picked)
+        already = set(picked)
+        for d, _ in mp[max_marketplace:]:
+            if d not in already:
+                picked.append(d)
+                extra -= 1
+                if extra <= 0:
+                    break
+    return picked
 
 
 async def _score_new_leads(merged: dict, relevance_scorer) -> None:
@@ -170,8 +202,15 @@ async def _score_new_leads(merged: dict, relevance_scorer) -> None:
 
 def _finalize(merged: dict, max_urls, threshold: float, drop_below_threshold: bool) -> list[dict]:
     entries = list(merged.values())
+    total = len(entries)
     if drop_below_threshold:
         entries = [e for e in entries if _effective_confidence(e) >= threshold]
+        passed = len(entries)
+        if total >= 30 and passed <= max(2, total // 20):
+            print(
+                f"   ↳ 置信度过滤(≥{threshold}): {passed}/{total} 条通过。"
+                f"短名/高同名歧义时请完善 COMPANY_ANCHOR(全称、官网、别名、地区)。"
+            )
     ranked = sorted(entries, key=_weighted_score, reverse=True)
     for entry in ranked:
         entry["engines"] = sorted(entry["engines"])
