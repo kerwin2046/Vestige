@@ -12,7 +12,14 @@ import re
 from collections import defaultdict
 from urllib.parse import urlsplit
 
-from config import DENOISE_MIN_LEADS_PER_DOMAIN, DENOISE_AGGREGATION_HIT_RATIO
+from config import (
+    DENOISE_MIN_LEADS_PER_DOMAIN,
+    DENOISE_AGGREGATION_HIT_RATIO,
+    DOMAIN_EXPANSION_BLOCKLIST,
+    MAX_URLS_PER_DOMAIN_IN_INVENTORY,
+    MAX_URLS_PER_OFFICIAL_DOMAIN,
+    MAX_URLS_PER_AGGREGATOR_DOMAIN,
+)
 
 # 功能性子域前缀，聚合时归并到主域（如 datasheets.globalspec.com → globalspec.com）
 _FUNCTIONAL_SUBDOMAINS = frozenset(
@@ -162,4 +169,115 @@ def filter_directory_noise(
             removed += 1
             continue
         kept.append(lead)
+    return kept, removed
+
+
+def _is_official_domain(domain: str, anchor: dict) -> bool:
+    official = _official_domain(anchor)
+    if not official:
+        return False
+    return domain == official or domain.endswith(f".{official}")
+
+
+def is_owned_domain(domain: str, leads: list[dict], anchor: dict) -> bool:
+    """
+    公司自有站：配置了 official_domain，或该域绝大多数线索为第一方。
+    用于折叠清单与 BFS 跳过 site: 深挖。
+    """
+    if _is_official_domain(domain, anchor):
+        return True
+    if len(leads) < 2:
+        return False
+    first_party = sum(1 for l in leads if l.get("ownership") == "first_party")
+    return first_party / len(leads) >= 0.7
+
+
+def _official_url_rank(lead: dict) -> tuple:
+    """官网代表链接：首页 > contact/about > 其余短路径 > 得分。"""
+    path = urlsplit(lead.get("url", "")).path.lower().rstrip("/") or "/"
+    if path in ("", "/"):
+        tier = 0
+    elif path in ("/contact", "/contact-us", "/about", "/about-us"):
+        tier = 1
+    elif "/contact" in path or "/about" in path:
+        tier = 2
+    else:
+        tier = 3
+    return (tier, len(path), -_lead_rank_score(lead))
+
+
+def _pick_domain_representatives(leads: list[dict], cap: int, owned: bool) -> list[dict]:
+    if len(leads) <= cap:
+        return leads
+    if owned:
+        ranked = sorted(leads, key=_official_url_rank)
+    else:
+        ranked = sorted(
+            leads,
+            key=lambda l: (l.get("ownership") != "first_party", -_lead_rank_score(l)),
+        )
+    return ranked[:cap]
+
+
+def _lead_rank_score(lead: dict) -> float:
+    ws = lead.get("weighted_score")
+    if ws is None:
+        conf = lead.get("confidence")
+        conf = 0.5 if conf is None else conf
+        ws = (lead.get("score") or 0.0) * conf
+    bonus = 1.0
+    if lead.get("ownership") == "first_party":
+        bonus *= 1.5
+    if lead.get("deep_extracted"):
+        bonus *= 1.2
+    return float(ws) * bonus
+
+
+def _is_aggregator_domain(domain: str, leads: list[dict]) -> bool:
+    """联系人黄页 / 软件对比站 / 名录类域名。"""
+    if domain in DOMAIN_EXPANSION_BLOCKLIST:
+        return True
+    if any((l.get("source_type") or "") == "marketplace_directory" for l in leads):
+        return True
+    if len(leads) >= DENOISE_MIN_LEADS_PER_DOMAIN:
+        paths = {urlsplit(l.get("url", "")).path for l in leads}
+        if len(paths) >= DENOISE_MIN_LEADS_PER_DOMAIN:
+            return True
+    return False
+
+
+def _domain_inventory_cap(domain: str, leads: list[dict], anchor: dict) -> int:
+    """返回该域名在清单中的条数上限。"""
+    if is_owned_domain(domain, leads, anchor):
+        return MAX_URLS_PER_OFFICIAL_DOMAIN
+    if _is_aggregator_domain(domain, leads):
+        return MAX_URLS_PER_AGGREGATOR_DOMAIN
+    return MAX_URLS_PER_DOMAIN_IN_INVENTORY
+
+
+def collapse_domain_redundancy(
+    inventory: list[dict],
+    anchor: dict,
+) -> tuple[list[dict], int]:
+    """
+    同域名折叠：每个域名只保留得分最高的若干条。
+
+    官网/公司自有站默认只留 1 条代表链接（首页优先）。
+    返回 (折叠后清单, 剔除条数)。
+    """
+    by_domain: dict[str, list[dict]] = defaultdict(list)
+    for lead in inventory:
+        by_domain[host_of(lead["url"])].append(lead)
+
+    kept: list[dict] = []
+    removed = 0
+    for domain, leads in by_domain.items():
+        cap = _domain_inventory_cap(domain, leads, anchor)
+        owned = is_owned_domain(domain, leads, anchor)
+        if len(leads) <= cap:
+            kept.extend(leads)
+            continue
+        picked = _pick_domain_representatives(leads, cap, owned)
+        kept.extend(picked)
+        removed += len(leads) - len(picked)
     return kept, removed

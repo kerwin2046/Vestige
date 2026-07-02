@@ -1,5 +1,6 @@
 # search/search_engine.py
 import asyncio
+from collections import defaultdict
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from config import (
@@ -14,7 +15,7 @@ from config import (
     RELEVANCE_THRESHOLD,
 )
 from search.backends import get_search_backend
-from search.denoise import domain_is_marketplace
+from search.denoise import domain_is_marketplace, host_of, is_owned_domain
 
 # 常见的跟踪类查询参数，规范化时去掉，避免同一页面因参数不同被当成不同 URL
 _TRACKING_PARAMS = {
@@ -125,12 +126,24 @@ def _domain_is_marketplace(merged: dict, domain: str) -> bool:
     return domain_is_marketplace(merged, domain)
 
 
+def _expansion_blocklist(anchor: dict | None) -> set[str]:
+    blocked = set(DOMAIN_EXPANSION_BLOCKLIST)
+    if not anchor:
+        return blocked
+    official = (anchor.get("official_domain") or "").lower().strip()
+    if official:
+        blocked.add(official)
+    return blocked
+
+
 def _rank_domains(
     merged: dict,
     exclude: set[str],
     limit: int,
     threshold: float,
     max_marketplace: int = MAX_MARKETPLACE_DOMAINS_PER_ROUND,
+    anchor: dict | None = None,
+    blocklist: set[str] | None = None,
 ) -> list[str]:
     """
     选出最有价值、尚未扩展过的来源域名，构成 BFS frontier。
@@ -138,11 +151,18 @@ def _rank_domains(
     """
     if limit <= 0:
         return []
+    blocked = blocklist if blocklist is not None else _expansion_blocklist(anchor)
+    by_domain: dict[str, list[dict]] = defaultdict(list)
+    for entry in merged.values():
+        by_domain[host_of(entry["url"])].append(entry)
+
     domain_scores: dict[str, float] = {}
     domain_passes_gate: dict[str, bool] = {}
     for entry in merged.values():
         domain = host_of(entry["url"])
-        if not domain or domain in DOMAIN_EXPANSION_BLOCKLIST or domain in exclude:
+        if not domain or domain in blocked or domain in exclude:
+            continue
+        if anchor and is_owned_domain(domain, by_domain.get(domain, []), anchor):
             continue
         domain_scores[domain] = domain_scores.get(domain, 0.0) + _weighted_score(entry)
         if _effective_confidence(entry) >= threshold:
@@ -232,6 +252,7 @@ async def search_company_footprint(
     relevance_threshold: float = RELEVANCE_THRESHOLD,
     drop_below_threshold: bool = False,
     backend=None,
+    anchor: dict | None = None,
 ) -> list[dict]:
     """
     多轮 BFS 公司足迹检索（Source Discovery）+ 身份消歧门控。
@@ -251,6 +272,7 @@ async def search_company_footprint(
     """
     merged: dict = {}
     expanded: set[str] = set()  # 已经做过 site: 深挖的域名，避免重复扩展
+    expansion_blocklist = _expansion_blocklist(anchor)
     if backend is None:
         backend = get_search_backend()
     print(f"   ↳ 使用检索后端: {backend.name}")
@@ -275,7 +297,14 @@ async def search_company_footprint(
 
         k = min(max_domains_per_round, remaining_budget)
         # frontier = 已发现但未扩展、且置信度过门的域名，按加权得分 best-first 选 top-k
-        candidates = _rank_domains(merged, exclude=expanded, limit=k, threshold=relevance_threshold)
+        candidates = _rank_domains(
+            merged,
+            exclude=expanded,
+            limit=k,
+            threshold=relevance_threshold,
+            anchor=anchor,
+            blocklist=expansion_blocklist,
+        )
         if not candidates:
             print(f"   ↳ Round {round_i}: 无满足置信度的新来源域名，BFS 收敛，停止。")
             break

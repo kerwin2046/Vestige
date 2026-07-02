@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from search.search_engine import search_company_footprint, host_of
-from search.denoise import filter_directory_noise, platform_key
+from search.denoise import filter_directory_noise, collapse_domain_redundancy, platform_key
 from crawlers.scraper import fetch_pages_content
 from llm.extractor import score_leads, extract_page, SOURCE_TYPE_LABELS, OWNERSHIP_LABELS
 from config import (
@@ -198,13 +198,17 @@ async def run_rag_pipeline(company: str | None = None) -> str:
         relevance_scorer=_make_scorer(company, anchor),
         relevance_threshold=RELEVANCE_THRESHOLD,
         drop_below_threshold=True,  # 仍剔除“不是这家公司”的同名噪声，但不限数量
+        anchor=anchor,
     )
     if not inventory:
         return "未能检索到与该公司相关的可信来源。"
     inventory, removed = filter_directory_noise(inventory, company, anchor)
     if removed:
         print(f"🧹 名录站去噪: 剔除 {removed} 条无关名录链接，保留 {len(inventory)} 条。")
-    print(f"🔗 [Step 1 成功] 足迹清单共 {len(inventory)} 个可信来源(完整保留)。")
+    inventory, collapsed = collapse_domain_redundancy(inventory, anchor)
+    if collapsed:
+        print(f"📎 同域折叠: 剔除 {collapsed} 条同质链接，保留 {len(inventory)} 条。")
+    print(f"🔗 [Step 1 成功] 足迹清单共 {len(inventory)} 个可信来源。")
 
     # 只对多样化子集做昂贵的抓取+抽取
     subset = _select_crawl_subset(inventory, MAX_URLS_TO_CRAWL, MAX_CRAWL_PER_DOMAIN)

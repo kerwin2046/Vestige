@@ -21,8 +21,8 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # ==========================================
 # 🔌 检索后端 (Pluggable Search Backend)
 # ==========================================
-# 可选: "exa"(推荐,API稳定) / "searxng" / "ddg" / "brave"
-# exa → .env 配置 EXA_API_KEY | brave → BRAVE_API_KEY
+# 可选: "exa"(API Key) / "exa-mcp"(免 Key,需 mcporter) / "searxng" / "ddg" / "brave"
+# exa → .env 配置 EXA_API_KEY | exa-mcp → npm i -g mcporter + Exa MCP 配置
 SEARCH_BACKEND = "exa"
 
 # Exa API — https://docs.exa.ai/reference/search-api-guide-for-coding-agents
@@ -30,6 +30,11 @@ SEARCH_BACKEND = "exa"
 EXA_SEARCH_TYPE = "auto"
 EXA_MAX_CONCURRENCY = 3
 EXA_MIN_INTERVAL_SEC = 0.5
+
+# Exa MCP (SEARCH_BACKEND=exa-mcp) — 通过 mcporter 调用 https://mcp.exa.ai/mcp
+# 安装: npm install -g mcporter && mcporter config add exa https://mcp.exa.ai/mcp
+MCPORTER_BIN = "mcporter"
+EXA_MCP_TIMEOUT_SEC = 60.0
 
 # 限流：避免“单 IP 高频”触发上游引擎的限流/CAPTCHA
 SEARCH_MAX_CONCURRENCY = 2      # 同时最多并发几条查询
@@ -101,11 +106,8 @@ MAX_MARKETPLACE_DOMAINS_PER_ROUND = 3
 # 整个流程累计最多扩展多少个域名（全局预算，最硬的刹车）
 MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 
-# 第二阶段域名扩展时跳过的“噪声/聚合”域名（搜索/社交大站按需保留或剔除）
-DOMAIN_EXPANSION_BLOCKLIST = {
-    "google.com", "bing.com", "duckduckgo.com", "youtube.com",
-    "translate.google.com", "webcache.googleusercontent.com",
-}
+# 第二阶段域名扩展时跳过的「噪声/聚合」域名（搜索大站 + 联系人/对比黄页）
+# 完整名单见下方 DOMAIN_EXPANSION_BLOCKLIST（与去噪配置同段）
 
 # ==========================================
 # 🎯 Step B: 身份锚定与消歧 (Disambiguation)
@@ -114,8 +116,8 @@ DOMAIN_EXPANSION_BLOCKLIST = {
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "冠盛",
-    "official_domain": "gs-proto.com",
+    "name": "1zu1",
+    "official_domain": "1zu1prototypen.com",
     "industry": "工业制造 / 汽车零部件 / 快速成型",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
@@ -134,6 +136,21 @@ RELEVANCE_THRESHOLD = 0.5
 DENOISE_MIN_LEADS_PER_DOMAIN = 3
 # 该域名下命中公司 token 的线索比例低于此值 → 视为聚合站，做 token 去噪
 DENOISE_AGGREGATION_HIT_RATIO = 0.5
+
+# 同域名在最终清单里最多保留几条
+MAX_URLS_PER_DOMAIN_IN_INVENTORY = 3
+# 官网/公司自有站：只留 1 条代表链接（首页或 contact 优先）
+MAX_URLS_PER_OFFICIAL_DOMAIN = 1
+# 联系人黄页、软件对比站等聚合域名更严格
+MAX_URLS_PER_AGGREGATOR_DOMAIN = 2
+# BFS 不再向这些域名做 site: 深挖（Discovery 仍可能命中）
+DOMAIN_EXPANSION_BLOCKLIST = {
+    "google.com", "bing.com", "duckduckgo.com", "youtube.com",
+    "translate.google.com", "webcache.googleusercontent.com",
+    # 联系人/对比类聚合站：深挖只会刷出大量同质页
+    "rocketreach.co", "zoominfo.com", "apollo.io", "lusha.com",
+    "slashdot.org", "g2.com", "capterra.com", "softwareadvice.com",
+}
 
 # ==========================================
 # 💾 输出

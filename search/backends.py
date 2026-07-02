@@ -3,14 +3,16 @@
 可插拔检索后端 (Pluggable Search Backends)。
 
 上层 BFS / 消歧逻辑只依赖统一接口 SearchBackend.search()，
-因此可以在 SearXNG / DDG / Brave / Exa API 之间自由切换而不动上层代码。
+因此可以在 SearXNG / DDG / Brave / Exa API / Exa MCP 之间自由切换而不动上层代码。
 
 所有后端共享一个限流器(AsyncThrottle)：并发上限 + 请求最小间隔，
 用来避免“单 IP 高频”触发上游引擎的限流/CAPTCHA。
 """
 import asyncio
+import json
 import os
 import re
+import shutil
 from abc import ABC, abstractmethod
 
 import httpx
@@ -214,6 +216,162 @@ def _exa_snippet(item) -> str:
     return text[:500] if text else ""
 
 
+def _exa_dict_snippet(item: dict) -> str:
+    highlights = item.get("highlights") or []
+    if highlights:
+        first = highlights[0]
+        return first if isinstance(first, str) else str(first)
+    summary = item.get("summary") or ""
+    if summary:
+        return summary
+    text = item.get("text") or ""
+    return text[:500] if text else ""
+
+
+def _extract_exa_results(data) -> list:
+    """从 mcporter --output json 的多种 MCP 信封里取出 Exa results 数组。"""
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+
+    if isinstance(data.get("results"), list):
+        return data["results"]
+
+    structured = data.get("structuredContent")
+    if isinstance(structured, dict) and isinstance(structured.get("results"), list):
+        return structured["results"]
+
+    nested = data.get("raw")
+    if isinstance(nested, dict):
+        found = _extract_exa_results(nested)
+        if found:
+            return found
+
+    content = data.get("content")
+    if isinstance(content, list):
+        for entry in content:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == "json":
+                payload = entry.get("json")
+                if payload is not None:
+                    found = _extract_exa_results(payload)
+                    if found:
+                        return found
+            text = entry.get("text") if entry.get("type") == "text" else None
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            found = _extract_exa_results(parsed)
+            if found:
+                return found
+    return []
+
+
+def _parse_mcporter_exa_response(raw_text: str) -> list[dict]:
+    """解析 mcporter JSON 输出为统一检索结果。"""
+    data = json.loads(raw_text)
+    if isinstance(data, dict) and data.get("issue"):
+        issue = data.get("issue")
+        server = data.get("server", "exa")
+        tool = data.get("tool", "web_search_exa")
+        raise RuntimeError(f"mcporter 调用失败 ({server}.{tool}): {issue}")
+
+    out = []
+    for item in _extract_exa_results(data)[:100]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not url:
+            continue
+        out.append(
+            {
+                "url": url,
+                "title": item.get("title") or "",
+                "snippet": _exa_dict_snippet(item),
+                "engine": "exa-mcp",
+            }
+        )
+    return out
+
+
+def _build_mcporter_exa_args(query: str, max_results: int) -> dict:
+    clean_query, include_domains = _exa_query_params(query)
+    args: dict = {
+        "query": clean_query,
+        "numResults": min(max(max_results, 1), 100),
+    }
+    if include_domains:
+        args["includeDomains"] = include_domains
+    return args
+
+
+class ExaMcpBackend(SearchBackend):
+    """
+    Exa Search via mcporter MCP — 免费、无需 EXA_API_KEY。
+
+    前置条件::
+        npm install -g mcporter
+        mcporter config add exa https://mcp.exa.ai/mcp
+    """
+
+    name = "exa-mcp"
+
+    def __init__(
+        self,
+        throttle: AsyncThrottle,
+        mcporter_bin: str = "mcporter",
+        timeout_sec: float = 60.0,
+    ):
+        super().__init__(throttle)
+        self.mcporter_bin = mcporter_bin
+        self.timeout_sec = timeout_sec
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not shutil.which(self.mcporter_bin):
+            raise RuntimeError(
+                f"未找到 {self.mcporter_bin!r}。请先安装: npm install -g mcporter，"
+                "并运行: mcporter config add exa https://mcp.exa.ai/mcp"
+            )
+
+        args = _build_mcporter_exa_args(query, max_results)
+        cmd = [
+            self.mcporter_bin,
+            "call",
+            "exa.web_search_exa",
+            "--args",
+            json.dumps(args, ensure_ascii=False),
+            "--output",
+            "json",
+        ]
+
+        def _sync() -> str:
+            import subprocess
+
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_sec,
+                check=False,
+            )
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                hint = (
+                    "若尚未配置 Exa MCP，请运行: "
+                    "mcporter config add exa https://mcp.exa.ai/mcp"
+                )
+                raise RuntimeError(err or f"mcporter 退出码 {proc.returncode}。{hint}")
+            return proc.stdout
+
+        raw = await asyncio.to_thread(_sync)
+        return _parse_mcporter_exa_response(raw)
+
+
 class ExaBackend(SearchBackend):
     """
     Exa Search API — 神经搜索，无 CAPTCHA。
@@ -274,6 +432,8 @@ def get_search_backend() -> SearchBackend:
         EXA_SEARCH_TYPE,
         EXA_MAX_CONCURRENCY,
         EXA_MIN_INTERVAL_SEC,
+        EXA_MCP_TIMEOUT_SEC,
+        MCPORTER_BIN,
         SEARCH_MAX_CONCURRENCY,
         SEARCH_MIN_INTERVAL_SEC,
     )
@@ -284,13 +444,20 @@ def get_search_backend() -> SearchBackend:
         throttle = AsyncThrottle(SEARXNG_MAX_CONCURRENCY, SEARXNG_MIN_INTERVAL_SEC)
         return SearxngBackend(throttle, SEARXNG_BASE_URL, SEARXNG_ENGINES)
 
-    if backend == "exa":
+    if backend in ("exa", "exa-api"):
         throttle = AsyncThrottle(EXA_MAX_CONCURRENCY, EXA_MIN_INTERVAL_SEC)
         return ExaBackend(throttle, os.getenv("EXA_API_KEY", ""), EXA_SEARCH_TYPE)
+
+    if backend in ("exa-mcp", "exa_mcp"):
+        throttle = AsyncThrottle(EXA_MAX_CONCURRENCY, EXA_MIN_INTERVAL_SEC)
+        return ExaMcpBackend(throttle, MCPORTER_BIN, EXA_MCP_TIMEOUT_SEC)
 
     throttle = AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
     if backend == "ddg":
         return DdgsBackend(throttle)
     if backend == "brave":
         return BraveApiBackend(throttle, os.getenv("BRAVE_API_KEY", ""))
-    raise ValueError(f"未知的 SEARCH_BACKEND: {SEARCH_BACKEND!r} (可选: searxng/ddg/brave/exa)")
+    raise ValueError(
+        f"未知的 SEARCH_BACKEND: {SEARCH_BACKEND!r} "
+        "(可选: searxng/ddg/brave/exa/exa-mcp)"
+    )

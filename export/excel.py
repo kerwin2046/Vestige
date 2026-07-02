@@ -9,6 +9,20 @@ from openpyxl.utils import get_column_letter
 
 from llm.extractor import SOURCE_TYPE_LABELS, OWNERSHIP_LABELS
 
+# 导出排序：高价值来源类型靠前
+_SOURCE_TYPE_ORDER = {
+    "social": 0,
+    "news_media": 1,
+    "community": 2,
+    "community_ugc": 3,
+    "public_record": 4,
+    "academic_technical": 5,
+    "event": 6,
+    "marketplace_directory": 7,
+    "other": 8,
+    "irrelevant": 99,
+}
+
 SOURCE_COLUMNS = [
     ("url", "URL"),
     ("domain", "域名"),
@@ -34,6 +48,17 @@ PLATFORM_COLUMNS = [
     ("display_name", "展示名"),
     ("count", "链接数"),
     ("top_urls", "示例链接"),
+]
+
+CONDENSED_COLUMNS = [
+    ("domain", "域名"),
+    ("source_type", "来源类型"),
+    ("ownership", "归属"),
+    ("count", "该域链接数"),
+    ("confidence", "代表链接置信度"),
+    ("weighted_score", "代表链接加权分"),
+    ("title", "代表标题"),
+    ("url", "代表 URL"),
 ]
 
 
@@ -78,11 +103,22 @@ def _write_sheet(ws, headers: list[str], rows: list[list], freeze: bool = True) 
         ws.column_dimensions[letter].width = max(10, min(max_len + 2, 50))
 
 
+def _source_sort_key(source: dict) -> tuple:
+    st = source.get("source_type") or "other"
+    own = source.get("ownership") or "unknown"
+    return (
+        _SOURCE_TYPE_ORDER.get(st, 8),
+        own != "first_party",
+        -(source.get("weighted_score") or 0),
+        -(source.get("confidence") or 0),
+    )
+
+
 def _source_rows(result: dict) -> list[list]:
     from search.denoise import platform_key
 
     rows = []
-    for s in result.get("sources", []):
+    for s in sorted(result.get("sources", []), key=_source_sort_key):
         detail = s.get("detail") or {}
         contacts = detail.get("contacts") or {}
         st = s.get("source_type") or "other"
@@ -108,7 +144,41 @@ def _source_rows(result: dict) -> list[list]:
                 s.get("weighted_score"),
             ]
         )
-    rows.sort(key=lambda r: (r[3] != OWNERSHIP_LABELS.get("first_party", ""), -(r[4] or 0)))
+    return rows
+
+
+def _condensed_rows(result: dict) -> list[list]:
+    """按域名聚合：每个域只展示一条代表链接 + 该域总数。"""
+    from collections import defaultdict
+    from search.denoise import host_of
+
+    by_domain: dict[str, list[dict]] = defaultdict(list)
+    for s in result.get("sources", []):
+        by_domain[s.get("domain") or host_of(s.get("url", ""))].append(s)
+
+    rows = []
+    domain_items = sorted(
+        by_domain.items(),
+        key=lambda item: _source_sort_key(
+            max(item[1], key=lambda s: (s.get("weighted_score") or 0, s.get("confidence") or 0))
+        ),
+    )
+    for domain, sources in domain_items:
+        best = max(sources, key=lambda s: (s.get("weighted_score") or 0, s.get("confidence") or 0))
+        st = best.get("source_type") or "other"
+        own = best.get("ownership") or "unknown"
+        rows.append(
+            [
+                domain,
+                SOURCE_TYPE_LABELS.get(st, st),
+                OWNERSHIP_LABELS.get(own, own),
+                len(sources),
+                best.get("confidence"),
+                best.get("weighted_score"),
+                best.get("title", ""),
+                best.get("url", ""),
+            ]
+        )
     return rows
 
 
@@ -167,6 +237,9 @@ def save_excel(result: dict, output_dir: str) -> Path:
 
     ws_sources = wb.create_sheet("足迹清单")
     _write_sheet(ws_sources, [h for _, h in SOURCE_COLUMNS], _source_rows(result))
+
+    ws_condensed = wb.create_sheet("按域名汇总")
+    _write_sheet(ws_condensed, [h for _, h in CONDENSED_COLUMNS], _condensed_rows(result))
 
     ws_platforms = wb.create_sheet("平台聚合")
     _write_sheet(ws_platforms, [h for _, h in PLATFORM_COLUMNS], _platform_rows(result))
