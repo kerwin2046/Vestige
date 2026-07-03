@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from search.search_engine import search_company_footprint, host_of
 from search.denoise import filter_directory_noise, collapse_domain_redundancy, platform_key
-from crawlers.scraper import fetch_pages_content
 from llm.extractor import score_leads, extract_page, SOURCE_TYPE_LABELS, OWNERSHIP_LABELS
 from config import (
     ACTIVE_MODEL,
@@ -58,16 +57,49 @@ def _platform_summary(inventory: list[dict]) -> list[dict]:
 
 
 def _select_crawl_subset(results: list[dict], budget: int, per_domain: int) -> list[dict]:
-    """从完整足迹清单里挑“多样化”子集做深度抓取：按加权得分优先，但每个域名最多 per_domain 条。"""
-    chosen, per_domain_count = [], defaultdict(int)
-    for r in results:  # results 已按 weighted_score 降序
-        domain = host_of(r["url"])
+    """
+    从完整足迹清单里挑多样化子集做深度抓取：
+    1) 尽量每个 source_type 至少 1 条（按各类最高分排序，受 budget 约束）
+    2) 在预算内按 weighted_score 填充，且每域名不超过 per_domain 条
+    """
+    if budget <= 0 or not results:
+        return []
+
+    chosen: list[dict] = []
+    chosen_urls: set[str] = set()
+    per_domain_count: dict[str, int] = defaultdict(int)
+
+    def _try_add(candidate: dict) -> bool:
+        url = candidate["url"]
+        if url in chosen_urls:
+            return False
+        domain = host_of(url)
         if per_domain_count[domain] >= per_domain:
-            continue
-        chosen.append(r)
+            return False
+        chosen.append(candidate)
+        chosen_urls.add(url)
         per_domain_count[domain] += 1
+        return True
+
+    by_type: dict[str, list[dict]] = defaultdict(list)
+    for r in results:
+        by_type[r.get("source_type") or "other"].append(r)
+
+    type_bests = sorted(
+        (max(leads, key=lambda x: x.get("weighted_score", 0)) for leads in by_type.values() if leads),
+        key=lambda x: x.get("weighted_score", 0),
+        reverse=True,
+    )
+    for best in type_bests:
         if len(chosen) >= budget:
             break
+        _try_add(best)
+
+    for r in results:
+        if len(chosen) >= budget:
+            break
+        _try_add(r)
+
     return chosen
 
 
@@ -77,6 +109,7 @@ def _build_result(company: str, anchor: dict, inventory: list[dict], enriched: d
     for lead in inventory:
         url = lead["url"]
         detail = enriched.get(url)
+        page_meta = (detail or {}).get("page_meta") or {}
         sources.append(
             {
                 "url": url,
@@ -90,6 +123,9 @@ def _build_result(company: str, anchor: dict, inventory: list[dict], enriched: d
                 "weighted_score": lead.get("weighted_score", 0.0),
                 "matched_queries": lead.get("matched_queries", []),
                 "engines": lead.get("engines", []),
+                "bfs_round": lead.get("bfs_round", 0),
+                "discovery_path": lead.get("discovery_path", ""),
+                "discovery_paths": lead.get("discovery_paths", []),
                 "deep_extracted": detail is not None,
                 "detail": None if detail is None else {
                     "company_name_on_page": detail.get("company_name_on_page", ""),
@@ -97,6 +133,9 @@ def _build_result(company: str, anchor: dict, inventory: list[dict], enriched: d
                     "contacts": detail.get("contacts", {"email": "", "phone": ""}),
                     "evidence_snippet": detail.get("evidence_snippet", ""),
                     "is_same_company_confidence": detail.get("is_same_company_confidence", 0.0),
+                    "page_links_count": len(page_meta.get("links") or []),
+                    "page_links_sample": (page_meta.get("links") or [])[:5],
+                    "json_ld_types": page_meta.get("json_ld_types") or [],
                 },
             }
         )
@@ -124,6 +163,8 @@ def _render_lead_line(r: dict, enriched: dict[str, dict]) -> list[str]:
     own = OWNERSHIP_LABELS.get(r.get("ownership", "unknown"), "未知")
     url = r["url"]
     lines = [f"- [{conf:.0%} · {own}] {url}"]
+    if r.get("discovery_path"):
+        lines.append(f"    发现路径: {r['discovery_path']}")
     detail = enriched.get(url)
     if detail:
         if detail.get("profile_or_handle"):
@@ -195,7 +236,7 @@ async def run_rag_pipeline(company: str | None = None) -> str:
     print(f"\n📡 [Step 1] 多轮 BFS 检索 + 身份消歧: '{company}' ...")
     inventory = await search_company_footprint(
         company,
-        relevance_scorer=_make_scorer(company, anchor),
+        relevance_scorer=_make_scorer(company, anchor), 
         relevance_threshold=RELEVANCE_THRESHOLD,
         drop_below_threshold=True,  # 仍剔除“不是这家公司”的同名噪声，但不限数量
         anchor=anchor,
@@ -211,22 +252,41 @@ async def run_rag_pipeline(company: str | None = None) -> str:
     print(f"🔗 [Step 1 成功] 足迹清单共 {len(inventory)} 个可信来源。")
 
     # 只对多样化子集做昂贵的抓取+抽取
+    from crawlers.scraper import fetch_pages_content
+
     subset = _select_crawl_subset(inventory, MAX_URLS_TO_CRAWL, MAX_CRAWL_PER_DOMAIN)
     print(f"\n🔍 [Step 2] 选取 {len(subset)} 个来源做深度抓取(每域名≤{MAX_CRAWL_PER_DOMAIN})...")
     urls = [r["url"] for r in subset]
-    pages_content = await fetch_pages_content(urls)
-    pairs = [(u, c) for u, c in zip(urls, pages_content) if c and c.strip()]
+    pages = await fetch_pages_content(urls)
+    pairs = [(u, p) for u, p in zip(urls, pages) if (p.get("markdown") or "").strip()]
     print(f"📊 [Step 2 成功] 成功抓取 {len(pairs)} 个页面。")
 
     enriched: dict[str, dict] = {}
     if pairs:
         print(f"\n🤖 [Step 3] 逐页结构化抽取 (Map) [{ACTIVE_MODEL}] ...")
         records = await asyncio.gather(
-            *[extract_page(company, anchor, u, c, model=ACTIVE_MODEL) for u, c in pairs]
+            *[
+                extract_page(company, anchor, u, p["markdown"], model=ACTIVE_MODEL)
+                for u, p in pairs
+            ]
         )
-        for (u, _), rec in zip(pairs, records):
+        for (u, page), rec in zip(pairs, records):
             if rec.get("is_same_company_confidence", 0) >= RELEVANCE_THRESHOLD:
-                enriched[u] = rec
+                json_ld_types = sorted(
+                    {
+                        item.get("@type")
+                        for item in (page.get("json_ld") or [])
+                        if isinstance(item, dict) and item.get("@type")
+                    }
+                )
+                enriched[u] = {
+                    **rec,
+                    "page_meta": {
+                        "links": page.get("links") or [],
+                        "json_ld_types": json_ld_types,
+                        "opengraph": page.get("opengraph") or {},
+                    },
+                }
         print(f"📝 [Step 3 成功] {len(enriched)} 个来源获得深度详情，正在汇总 (Reduce) ...")
 
     result = _build_result(company, anchor, inventory, enriched)

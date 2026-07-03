@@ -13,6 +13,7 @@ from config import (
     MAX_TOTAL_DOMAINS_TO_EXPAND,
     DOMAIN_EXPANSION_BLOCKLIST,
     RELEVANCE_THRESHOLD,
+    SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO,
 )
 from search.backends import get_search_backend
 from search.denoise import domain_is_marketplace, host_of, is_owned_domain
@@ -73,15 +74,28 @@ async def _run_queries(backend, queries: list[str], max_results: int) -> list[li
     return await asyncio.gather(*tasks)
 
 
-def _merge_into(merged: dict, queries: list[str], per_query_results: list[list[dict]]) -> dict:
+def _format_discovery_path(bfs_round: int, query: str, rank: int, engine: str) -> str:
+    phase = "discovery" if bfs_round == 0 else f"focused-r{bfs_round}"
+    engine_label = engine or "unknown"
+    return f"search:{phase} | query={query!r} | rank={rank + 1} | engine={engine_label}"
+
+
+def _merge_into(
+    merged: dict,
+    queries: list[str],
+    per_query_results: list[list[dict]],
+    bfs_round: int = 0,
+) -> dict:
     """
     把一批查询结果按规范化 URL 合并进累加器 merged，并累加得分。
     一个 URL 被越多查询命中、在各查询里排名越靠前，得分越高。
+    首次命中时记录 bfs_round 与 discovery_paths（可解释「怎么发现的」）。
     """
     for query, results in zip(queries, per_query_results):
         for rank, item in enumerate(results):
             canon = canonicalize_url(item["url"])
             rank_score = 1.0 / (rank + 1)
+            path = _format_discovery_path(bfs_round, query, rank, item.get("engine", ""))
 
             entry = merged.get(canon)
             if entry is None:
@@ -92,33 +106,51 @@ def _merge_into(merged: dict, queries: list[str], per_query_results: list[list[d
                     "snippet": item["snippet"],
                     "engines": set(),
                     "matched_queries": set(),
+                    "discovery_paths": [path],
+                    "bfs_round": bfs_round,
+                    "first_query": query,
                     "score": 0.0,
                     "confidence": None,   # 消歧置信度，None 表示尚未打分
                     "source_type": "",    # 由消歧/抽取阶段填充
                     "ownership": "",      # 由消歧/抽取阶段填充
                 }
                 merged[canon] = entry
+            else:
+                paths = entry.setdefault("discovery_paths", [])
+                if path not in paths:
+                    paths.append(path)
+                if bfs_round < entry.get("bfs_round", bfs_round):
+                    entry["bfs_round"] = bfs_round
+                    entry["first_query"] = query
 
             entry["score"] += rank_score
             entry["matched_queries"].add(query)
-            if item["engine"]:
+            if item.get("engine"):
                 entry["engines"].add(item["engine"])
-            if not entry["title"] and item["title"]:
+            if not entry["title"] and item.get("title"):
                 entry["title"] = item["title"]
-            if not entry["snippet"] and item["snippet"]:
+            if not entry["snippet"] and item.get("snippet"):
                 entry["snippet"] = item["snippet"]
     return merged
 
 
 def _effective_confidence(entry: dict) -> float:
-    """未打分(None)时按中性 1.0 处理，避免在没有 scorer 时误伤排序/扩展。"""
+    """未打分(None)时按中性 1.0 处理，仅用于无 scorer 时的排序退化。"""
     conf = entry.get("confidence")
     return 1.0 if conf is None else conf
 
 
+def _passes_relevance_gate(entry: dict, threshold: float) -> bool:
+    """BFS / 最终过滤：必须已评分且达到阈值。"""
+    conf = entry.get("confidence")
+    return conf is not None and conf >= threshold
+
+
 def _weighted_score(entry: dict) -> float:
-    """最终排序用：原始检索得分 × 消歧置信度。"""
-    return entry["score"] * _effective_confidence(entry)
+    """最终排序用：原始检索得分 × 消歧置信度（未评分按 0 处理）。"""
+    conf = entry.get("confidence")
+    multiplier = 0.0 if conf is None else conf
+    return entry["score"] * multiplier
 
 
 def _domain_is_marketplace(merged: dict, domain: str) -> bool:
@@ -164,8 +196,9 @@ def _rank_domains(
             continue
         if anchor and is_owned_domain(domain, by_domain.get(domain, []), anchor):
             continue
-        domain_scores[domain] = domain_scores.get(domain, 0.0) + _weighted_score(entry)
-        if _effective_confidence(entry) >= threshold:
+        if entry.get("confidence") is not None:
+            domain_scores[domain] = domain_scores.get(domain, 0.0) + _weighted_score(entry)
+        if _passes_relevance_gate(entry, threshold):
             domain_passes_gate[domain] = True
 
     mp: list[tuple[str, float]] = []
@@ -195,36 +228,65 @@ def _rank_domains(
     return picked
 
 
-async def _score_new_leads(merged: dict, relevance_scorer) -> None:
-    """对尚未打分(confidence is None)的线索调用注入的 scorer，把置信度写回 entry。"""
+async def _score_new_leads(merged: dict, relevance_scorer) -> tuple[int, int]:
+    """
+    对尚未打分(confidence is None)的线索调用 scorer。
+    返回 (本批获得评分数, 本批待评分数)。
+    未获评分的线索保持 confidence=None。
+    """
     if relevance_scorer is None:
-        return
+        return 0, 0
     pending = [e for e in merged.values() if e["confidence"] is None]
     if not pending:
-        return
+        return 0, 0
     print(f"   ↳ 消歧打分 (LLM): 对 {len(pending)} 条新线索评估归属置信度 ...")
     leads = [{"url": e["url"], "title": e["title"], "snippet": e["snippet"]} for e in pending]
     scores = await relevance_scorer(leads)
-    scored = sum(1 for e in pending if scores.get(e["url"]) is not None)
-    print(f"   ↳ 消歧完成: {scored}/{len(pending)} 条获得评分"
-          + ("" if scored else " (scorer 未返回有效结果，已按中性 0.5 处理)"))
+    scored = 0
+    unscored = 0
     for entry in pending:
         info = scores.get(entry["url"])
         if info is None:
-            entry["confidence"] = 0.5  # scorer 没覆盖到，给中性值，避免一直当未打分
+            unscored += 1
             continue
+        scored += 1
         entry["confidence"] = info.get("confidence", 0.5)
         if info.get("source_type"):
             entry["source_type"] = info["source_type"]
         if info.get("ownership"):
             entry["ownership"] = info["ownership"]
+    if unscored:
+        print(
+            f"   ↳ 消歧完成: {scored}/{len(pending)} 条获得评分，"
+            f"{unscored} 条未评分(保持 confidence=None，不参与 BFS 扩展)"
+        )
+    else:
+        print(f"   ↳ 消歧完成: {scored}/{len(pending)} 条获得评分")
+    return scored, len(pending)
+
+
+def _bfs_should_abort(merged: dict, scored: int, pending: int) -> bool:
+    """消歧失败或未覆盖过多时停止 BFS，避免盲扩。"""
+    if pending == 0:
+        return False
+    if scored == 0:
+        print("   ↳ 消歧完全失败(0 条获得评分)，停止 BFS 扩展。")
+        return True
+    unscored_ratio = (pending - scored) / pending
+    if unscored_ratio > SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO:
+        print(
+            f"   ↳ 消歧未完成({pending - scored}/{pending} 未评分，"
+            f">{SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO:.0%})，停止 BFS 扩展。"
+        )
+        return True
+    return False
 
 
 def _finalize(merged: dict, max_urls, threshold: float, drop_below_threshold: bool) -> list[dict]:
     entries = list(merged.values())
     total = len(entries)
     if drop_below_threshold:
-        entries = [e for e in entries if _effective_confidence(e) >= threshold]
+        entries = [e for e in entries if _passes_relevance_gate(e, threshold)]
         passed = len(entries)
         if total >= 30 and passed <= max(2, total // 20):
             print(
@@ -235,6 +297,9 @@ def _finalize(merged: dict, max_urls, threshold: float, drop_below_threshold: bo
     for entry in ranked:
         entry["engines"] = sorted(entry["engines"])
         entry["matched_queries"] = sorted(entry["matched_queries"])
+        paths = entry.get("discovery_paths") or []
+        entry["discovery_path"] = paths[0] if paths else ""
+        entry["bfs_round"] = entry.get("bfs_round", 0)
         entry["weighted_score"] = round(_weighted_score(entry), 3)
     # max_urls 为 None 表示不截断（足迹清单要完整，越多越好）
     return ranked if max_urls is None else ranked[:max_urls]
@@ -281,11 +346,14 @@ async def search_company_footprint(
     discovery_queries = [t.format(company=company) for t in DISCOVERY_QUERY_TEMPLATES]
     print(f"   ↳ Round 0 (Discovery): {len(discovery_queries)} 条广度查询(限流并发) ...")
     r0 = await _run_queries(backend, discovery_queries, max_results_per_query)
-    _merge_into(merged, discovery_queries, r0)
+    _merge_into(merged, discovery_queries, r0, bfs_round=0)
     print(f"   ↳ Round 0 完成: 去重后累计 {len(merged)} 条线索")
-    await _score_new_leads(merged, relevance_scorer)
+    scored_r0, pending_r0 = await _score_new_leads(merged, relevance_scorer)
 
     if not expand_sources:
+        return _finalize(merged, max_urls, relevance_threshold, drop_below_threshold)
+
+    if relevance_scorer is not None and _bfs_should_abort(merged, scored_r0, pending_r0):
         return _finalize(merged, max_urls, relevance_threshold, drop_below_threshold)
 
     # ---------- Round 1..N: BFS Focused ----------
@@ -317,9 +385,11 @@ async def search_company_footprint(
         ]
         print(f"   ↳ Round {round_i}: 执行 {len(focused_queries)} 条定向查询(限流并发，预计较慢) ...")
         results = await _run_queries(backend, focused_queries, max_results_per_query)
-        _merge_into(merged, focused_queries, results)
+        _merge_into(merged, focused_queries, results, bfs_round=round_i)
         print(f"   ↳ Round {round_i}: 去重后累计 {len(merged)} 条线索")
-        await _score_new_leads(merged, relevance_scorer)
+        scored_rn, pending_rn = await _score_new_leads(merged, relevance_scorer)
+        if relevance_scorer is not None and _bfs_should_abort(merged, scored_rn, pending_rn):
+            break
         expanded.update(candidates)
 
     print(f"   ↳ BFS 结束：累计扩展 {len(expanded)} 个来源域名，去重后共 {len(merged)} 条线索。")

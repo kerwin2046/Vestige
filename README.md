@@ -80,6 +80,9 @@ BRAVE_API_KEY=xxx
 | `SEARCH_MAX_CONCURRENCY` / `SEARCH_MIN_INTERVAL_SEC` | 检索限流(避免被上游反爬) |
 | `COMPANY_ANCHOR` | 目标公司身份锚点(名称/官网/行业/地区/别名),消歧的基准 |
 | `RELEVANCE_THRESHOLD` | 置信度阈值,低于则过滤、且不进 BFS 扩展 |
+| `SCORE_LEADS_BATCH_SIZE` | LLM 消歧每批线索数(过大易触发上游 500) |
+| `SCORE_LEADS_MAX_RETRIES` / `SCORE_LEADS_RETRY_BACKOFF_SEC` | 消歧 5xx/超时重试 |
+| `SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO` | 未评分线索占比超此值则停止 BFS |
 | `MAX_BFS_ROUNDS` / `MAX_DOMAINS_PER_ROUND` / `MAX_TOTAL_DOMAINS_TO_EXPAND` | BFS 三道刹车 |
 | `MAX_URLS_TO_CRAWL` / `MAX_CRAWL_PER_DOMAIN` | 深度抓取的成本预算(不影响足迹清单完整性) |
 | `DISCOVERY_QUERY_TEMPLATES` / `FOCUSED_QUERY_TEMPLATES` | 广度/深挖查询模板 |
@@ -146,6 +149,7 @@ python3 main.py
 
 - 这是一个研究/自用性质的情报聚合工具,请遵守各平台 ToS 与当地数据合规要求。
 - LinkedIn/Facebook 等平台对爬虫敏感,直接抓取常拿不到完整内容,通常只能依赖搜索摘要。
+- LLM 消歧失败时线索保持 `confidence=None`,不会默认 0.5 放行 BFS;请检查 `ACTIVE_MODEL` 与 API 可用性,或调小 `SCORE_LEADS_BATCH_SIZE`。
 
 ## 技术栈
 

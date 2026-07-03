@@ -21,9 +21,13 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # ==========================================
 # 🔌 检索后端 (Pluggable Search Backend)
 # ==========================================
-# 可选: "exa"(API Key) / "exa-mcp"(免 Key,需 mcporter) / "searxng" / "ddg" / "brave"
+# 可选: exa / exa-mcp / searxng / ddg / brave / serper / bing / tavily / bocha
 # exa → .env 配置 EXA_API_KEY | exa-mcp → npm i -g mcporter + Exa MCP 配置
+# serper / bing → site: 深挖更稳 | tavily → AI 搜索 | bocha → 中文网页
 SEARCH_BACKEND = "exa"
+# 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
+# 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
+SEARCH_FALLBACK_BACKENDS = []
 
 # Exa API — https://docs.exa.ai/reference/search-api-guide-for-coding-agents
 # type: auto(默认) | fast | instant | deep-lite | deep | deep-reasoning
@@ -39,6 +43,10 @@ EXA_MCP_TIMEOUT_SEC = 60.0
 # 限流：避免“单 IP 高频”触发上游引擎的限流/CAPTCHA
 SEARCH_MAX_CONCURRENCY = 2      # 同时最多并发几条查询
 SEARCH_MIN_INTERVAL_SEC = 2.0   # 相邻两条查询的最小间隔(秒)
+
+# Bing Web Search API (SEARCH_BACKEND=bing)
+BING_SEARCH_V7_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search"
+BING_LOCALE = "zh-CN"  # site: 与中文公司名可改为 zh-CN；国际公司可用 en-US
 
 # ==========================================
 # 🔎 公司足迹检索配置 (Step A: Query Fan-out)
@@ -61,9 +69,9 @@ MAX_CRAWL_PER_DOMAIN = 1      # 同一域名只抓 1 个页面(深抓目的是�
 DISCOVERY_QUERY_TEMPLATES = [
     # 泛 / owned(官网)
     '"{company}"',
-    # '"{company}" official website OR contact',
+    '"{company}" official website OR contact',
     # social(社媒)
-    # '"{company}" linkedin OR facebook OR youtube',
+    '"{company}" linkedin OR facebook OR youtube',
     # community / ugc(社区/评论/对比)
     '"{company}" review',
     '"{company}" forum OR reddit',
@@ -116,18 +124,26 @@ MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "1zu1",
-    "official_domain": "1zu1prototypen.com",
-    "industry": "工业制造 / 汽车零部件 / 快速成型",
+    "name": "Additive-X",
+    "official_domain": "additive-x.com",
+    "industry": "Additive Manufacturing / 3D Printing / Rapid Prototyping",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
-    "aliases": ["冠盛股份", "GS Proto", "gsproto"],
+    "aliases": ["Additive-X", "Additive-X Inc.", "Additive-X Inc"],
 }
 
 # 线索的“同一家公司”置信度阈值（0~1）：
 # - 低于该值的线索在最终结果里会被沉底/过滤
 # - 低于该值的域名不会进入 BFS 扩展队列（避免越挖越偏）
 RELEVANCE_THRESHOLD = 0.5
+
+# LLM 消歧打分（score_leads）：分批与重试，避免单次 prompt 过大触发上游 500
+SCORE_LEADS_BATCH_SIZE = 20
+SCORE_LEADS_MAX_RETRIES = 2
+SCORE_LEADS_RETRY_BACKOFF_SEC = 2.0
+SCORE_LEADS_SNIPPET_MAX = 300
+# 消歧后未评分线索占比超过此值则停止 BFS（避免盲扩）
+SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO = 0.3
 
 # ==========================================
 # 🧹 名录站去噪（动态，无静态站名单）

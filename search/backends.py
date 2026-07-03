@@ -421,10 +421,128 @@ class ExaBackend(SearchBackend):
         return out
 
 
-def get_search_backend() -> SearchBackend:
-    """根据 config.SEARCH_BACKEND 构造后端实例（每次检索任务用一个，限流器随之共享）。"""
+class SerperBackend(SearchBackend):
+    """Google Search via serper.dev — 对 site: 语法支持稳定。"""
+
+    name = "serper"
+
+    def __init__(self, throttle: AsyncThrottle, api_key: str):
+        super().__init__(throttle)
+        self.api_key = api_key
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not self.api_key:
+            raise RuntimeError("缺少 SERPER_API_KEY，请在 .env 配置后再使用 serper 后端")
+        from search.adapters import serper
+
+        return await serper.search(self.api_key, query, max_results)
+
+
+class BingBackend(SearchBackend):
+    """Microsoft Bing Web Search API v7。"""
+
+    name = "bing"
+
+    def __init__(
+        self,
+        throttle: AsyncThrottle,
+        subscription_key: str,
+        endpoint: str,
+        locale: str,
+    ):
+        super().__init__(throttle)
+        self.subscription_key = subscription_key
+        self.endpoint = endpoint
+        self.locale = locale
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not self.subscription_key:
+            raise RuntimeError(
+                "缺少 BING_SEARCH_V7_SUBSCRIPTION_KEY，请在 .env 配置后再使用 bing 后端"
+            )
+        from search.adapters import bing
+
+        return await bing.search(
+            self.subscription_key,
+            query,
+            max_results,
+            endpoint=self.endpoint,
+            locale=self.locale,
+        )
+
+
+class TavilyBackend(SearchBackend):
+    """Tavily AI Search API。"""
+
+    name = "tavily"
+
+    def __init__(self, throttle: AsyncThrottle, api_key: str):
+        super().__init__(throttle)
+        self.api_key = api_key
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not self.api_key:
+            raise RuntimeError("缺少 TAVILY_API_KEY，请在 .env 配置后再使用 tavily 后端")
+        from search.adapters import tavily
+
+        return await tavily.search(self.api_key, query, max_results)
+
+
+class BochaBackend(SearchBackend):
+    """博查 AI 中文网页搜索。"""
+
+    name = "bocha"
+
+    def __init__(self, throttle: AsyncThrottle, api_key: str):
+        super().__init__(throttle)
+        self.api_key = api_key
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        if not self.api_key:
+            raise RuntimeError("缺少 BOCHA_API_KEY，请在 .env 配置后再使用 bocha 后端")
+        from search.adapters import bocha
+
+        return await bocha.search(self.api_key, query, max_results)
+
+
+class FallbackBackend(SearchBackend):
+    """主引擎失败或空结果时，依次尝试备用引擎。"""
+
+    def __init__(self, throttle: AsyncThrottle, backends: list[SearchBackend]):
+        super().__init__(throttle)
+        self.backends = backends
+        self.name = "/".join(b.name for b in backends)
+
+    async def search(self, query: str, max_results: int) -> list[dict]:
+        """逐个调用子后端（各自限流）；首个非空结果即返回。"""
+        for backend in self.backends:
+            results = await backend.search(query, max_results)
+            if results:
+                return results
+        return []
+
+    async def _search_impl(self, query: str, max_results: int) -> list[dict]:
+        return []
+
+
+_KNOWN_BACKENDS = (
+    "searxng",
+    "ddg",
+    "brave",
+    "exa",
+    "exa-api",
+    "exa-mcp",
+    "exa_mcp",
+    "serper",
+    "bing",
+    "tavily",
+    "bocha",
+)
+
+
+def _build_backend(name: str) -> SearchBackend:
+    """按名称构造单个检索后端（不含 fallback 包装）。"""
     from config import (
-        SEARCH_BACKEND,
         SEARXNG_BASE_URL,
         SEARXNG_ENGINES,
         SEARXNG_MAX_CONCURRENCY,
@@ -436,9 +554,11 @@ def get_search_backend() -> SearchBackend:
         MCPORTER_BIN,
         SEARCH_MAX_CONCURRENCY,
         SEARCH_MIN_INTERVAL_SEC,
+        BING_SEARCH_V7_ENDPOINT,
+        BING_LOCALE,
     )
 
-    backend = (SEARCH_BACKEND or "searxng").lower()
+    backend = (name or "searxng").lower()
 
     if backend == "searxng":
         throttle = AsyncThrottle(SEARXNG_MAX_CONCURRENCY, SEARXNG_MIN_INTERVAL_SEC)
@@ -453,11 +573,50 @@ def get_search_backend() -> SearchBackend:
         return ExaMcpBackend(throttle, MCPORTER_BIN, EXA_MCP_TIMEOUT_SEC)
 
     throttle = AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
+
     if backend == "ddg":
         return DdgsBackend(throttle)
     if backend == "brave":
         return BraveApiBackend(throttle, os.getenv("BRAVE_API_KEY", ""))
+    if backend == "serper":
+        return SerperBackend(throttle, os.getenv("SERPER_API_KEY", ""))
+    if backend == "bing":
+        return BingBackend(
+            throttle,
+            os.getenv("BING_SEARCH_V7_SUBSCRIPTION_KEY", ""),
+            os.getenv("BING_SEARCH_V7_ENDPOINT", BING_SEARCH_V7_ENDPOINT),
+            BING_LOCALE,
+        )
+    if backend == "tavily":
+        return TavilyBackend(throttle, os.getenv("TAVILY_API_KEY", ""))
+    if backend == "bocha":
+        return BochaBackend(throttle, os.getenv("BOCHA_API_KEY", ""))
+
     raise ValueError(
-        f"未知的 SEARCH_BACKEND: {SEARCH_BACKEND!r} "
-        "(可选: searxng/ddg/brave/exa/exa-mcp)"
+        f"未知的检索后端: {name!r} "
+        f"(可选: {', '.join(_KNOWN_BACKENDS)})"
     )
+
+
+def get_search_backend() -> SearchBackend:
+    """根据 config.SEARCH_BACKEND 构造后端；若配置了 SEARCH_FALLBACK_BACKENDS 则自动包装。"""
+    from config import SEARCH_BACKEND, SEARCH_FALLBACK_BACKENDS
+
+    primary = _build_backend(SEARCH_BACKEND)
+    fallbacks = [n.strip().lower() for n in (SEARCH_FALLBACK_BACKENDS or []) if n and n.strip()]
+    if not fallbacks:
+        return primary
+
+    chain = [primary]
+    for name in fallbacks:
+        if name == (SEARCH_BACKEND or "").lower():
+            continue
+        try:
+            chain.append(_build_backend(name))
+        except ValueError as e:
+            print(f"⚠️ 忽略未知 fallback 后端 {name!r}: {e}")
+
+    if len(chain) == 1:
+        return primary
+
+    return FallbackBackend(primary.throttle, chain)

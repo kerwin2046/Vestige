@@ -6,6 +6,7 @@ Step B: 身份锚定 + 消歧 + 逐页结构化抽取。
                   输出置信度。用于排序、过滤以及 BFS 扩展门控。
 - extract_page(): 抓取后，对单个页面按固定 schema 结构化抽取。
 """
+import asyncio
 import json
 import re
 
@@ -23,15 +24,15 @@ litellm.disable_aiohttp_transport = True
 # 两者都是英文枚举(稳定机器键)，展示时再映射成中文。
 # ============================================================
 SOURCE_TYPES = [
-    # "owned",                  # 自有/官方发布物(官网、官方博客、官方账号)
+    "owned",                  # 自有/官方发布物(官网、官方博客、官方账号)
     "social",                 # 社媒/SOCMINT
     "community",              # 社区/论坛/Q&A/评论
     "news_media",             # 新闻媒体/编辑内容
     "community_ugc",          # 用户生成内容(论坛/评论/Q&A/对比帖)
     "marketplace_directory",  # 交易/名录(B2B平台、电商、企业黄页、供应商目录)
-    # "reference",              # 参考/数据库(维基、企业信息库、行业百科)
+    "reference",              # 参考/数据库(维基、企业信息库、行业百科)
     "public_record",          # 公开记录/监管(工商注册、专利、法律、招投标)
-    # "recruitment",            # 招聘
+    "recruitment",            # 招聘
     "academic_technical",     # 学术/技术(论文、技术文档、标准、白皮书)
     "event",                  # 展会/会议
     "other",                  # 其他
@@ -39,15 +40,15 @@ SOURCE_TYPES = [
 ]
 
 SOURCE_TYPE_LABELS = {
-    # "owned": "自有/官方发布物",
+    "owned": "自有/官方发布物",
     "social": "社媒/SOCMINT",
     "community": "社区/论坛/Q&A/评论",
     "news_media": "新闻媒体/编辑内容",
     "community_ugc": "用户生成内容(论坛/评论/Q&A/对比帖)",
     "marketplace_directory": "交易/名录(B2B平台、电商、企业黄页、供应商目录)",
-    # "reference": "参考/数据库(维基、企业信息库、行业百科)",
+    "reference": "参考/数据库(维基、企业信息库、行业百科)",
     "public_record": "公开记录/监管(工商注册、专利、法律、招投标)",
-    # "recruitment": "招聘",
+    "recruitment": "招聘",
     "academic_technical": "学术/技术(论文、技术文档、标准、白皮书)",
     "event": "展会/会议",
     "other": "其他",
@@ -130,38 +131,25 @@ _SCORE_PROMPT = """你是公司情报分析师。下面是目标公司的“身�
 不要输出除 JSON 以外的任何文字。"""
 
 
-async def score_leads(company: str, anchor: dict, leads: list[dict], model: str) -> dict[str, dict]:
-    """
-    对一批线索做消歧打分。
+def _truncate_snippet(text: str, max_len: int) -> str:
+    if not text or len(text) <= max_len:
+        return text or ""
+    return text[: max_len - 1] + "…"
 
-    leads: [{"url":..., "title":..., "snippet":...}, ...]
-    返回: {url: {"confidence": float, "source_type": str, "ownership": str, "reason": str}}
-    解析失败时返回空 dict（调用方应作降级处理）。
-    """
-    if not leads:
-        return {}
 
-    compact = [
-        {"index": i, "url": d.get("url", ""), "title": d.get("title", ""), "snippet": d.get("snippet", "")}
-        for i, d in enumerate(leads)
-    ]
-    prompt = _SCORE_PROMPT.format(
-        anchor=_anchor_text(anchor),
-        leads=json.dumps(compact, ensure_ascii=False),
-        source_types="/".join(SOURCE_TYPES),
-        ownership_types="/".join(OWNERSHIP_TYPES),
-    )
+def _is_retryable_score_error(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    if "timeout" in name or "ratelimit" in name or "rate_limit" in name:
+        return True
+    if "internalserver" in name or "serviceunavailable" in name or "apierror" in name:
+        return True
+    msg = str(exc).lower()
+    return "internal server error" in msg or "rate limit" in msg or "timeout" in msg
 
-    try:
-        resp = await acompletion(model=model, messages=[{"role": "user", "content": prompt}])
-        parsed = _parse_json(resp.choices[0].message.content)
-    except Exception as e:
-        print(f"⚠️ 消歧打分失败: {e}")
-        return {}
 
+def _parse_score_response(leads: list[dict], parsed) -> dict[str, dict]:
     if not isinstance(parsed, list):
         return {}
-
     out: dict[str, dict] = {}
     for item in parsed:
         try:
@@ -182,6 +170,102 @@ async def score_leads(company: str, anchor: dict, leads: list[dict], model: str)
             "reason": item.get("reason", ""),
         }
     return out
+
+
+async def _score_leads_batch(
+    anchor: dict,
+    leads: list[dict],
+    model: str,
+    snippet_max: int,
+) -> dict[str, dict]:
+    """对单批线索调用 LLM 消歧，失败时抛异常供上层重试。"""
+    compact = [
+        {
+            "index": i,
+            "url": d.get("url", ""),
+            "title": d.get("title", ""),
+            "snippet": _truncate_snippet(d.get("snippet", ""), snippet_max),
+        }
+        for i, d in enumerate(leads)
+    ]
+    prompt = _SCORE_PROMPT.format(
+        anchor=_anchor_text(anchor),
+        leads=json.dumps(compact, ensure_ascii=False),
+        source_types="/".join(SOURCE_TYPES),
+        ownership_types="/".join(OWNERSHIP_TYPES),
+    )
+    resp = await acompletion(model=model, messages=[{"role": "user", "content": prompt}])
+    parsed = _parse_json(resp.choices[0].message.content)
+    return _parse_score_response(leads, parsed)
+
+
+async def score_leads(
+    company: str,
+    anchor: dict,
+    leads: list[dict],
+    model: str,
+    batch_size: int | None = None,
+    max_retries: int | None = None,
+    retry_backoff_sec: float | None = None,
+    snippet_max: int | None = None,
+) -> dict[str, dict]:
+    """
+    对一批线索做消歧打分（分批 + 重试）。
+
+    leads: [{"url":..., "title":..., "snippet":...}, ...]
+    返回: {url: {"confidence": float, "source_type": str, "ownership": str, "reason": str}}
+    单批失败时跳过该批，不写入分数；调用方应保持 confidence=None。
+    """
+    del company  # anchor 已含公司身份；保留参数以兼容 pipeline 回调签名
+    if not leads:
+        return {}
+
+    from config import (
+        SCORE_LEADS_BATCH_SIZE,
+        SCORE_LEADS_MAX_RETRIES,
+        SCORE_LEADS_RETRY_BACKOFF_SEC,
+        SCORE_LEADS_SNIPPET_MAX,
+    )
+
+    batch_size = batch_size if batch_size is not None else SCORE_LEADS_BATCH_SIZE
+    max_retries = max_retries if max_retries is not None else SCORE_LEADS_MAX_RETRIES
+    retry_backoff_sec = (
+        retry_backoff_sec if retry_backoff_sec is not None else SCORE_LEADS_RETRY_BACKOFF_SEC
+    )
+    snippet_max = snippet_max if snippet_max is not None else SCORE_LEADS_SNIPPET_MAX
+
+    merged: dict[str, dict] = {}
+    total_batches = (len(leads) + batch_size - 1) // batch_size
+    for batch_i in range(0, len(leads), batch_size):
+        batch = leads[batch_i : batch_i + batch_size]
+        batch_no = batch_i // batch_size + 1
+        if total_batches > 1:
+            print(f"   ↳ 消歧批次 {batch_no}/{total_batches}（{len(batch)} 条）...")
+
+        last_err: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                batch_out = await _score_leads_batch(anchor, batch, model, snippet_max)
+                merged.update(batch_out)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < max_retries and _is_retryable_score_error(e):
+                    wait = retry_backoff_sec * (2**attempt)
+                    print(
+                        f"⚠️ 消歧批次 {batch_no} 失败(重试 {attempt + 1}/{max_retries}): {e}"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                print(f"⚠️ 消歧批次 {batch_no} 失败，跳过该批: {e}")
+                break
+
+        if last_err is not None and batch_no == 1 and total_batches == 1:
+            # 单批且彻底失败时保持与旧行为一致的顶层提示
+            print(f"⚠️ 消歧打分失败: {last_err}")
+
+    return merged
 
 
 _EXTRACT_PROMPT = """你是公司情报分析师。下面是目标公司的身份锚点，以及抓取到的某个网页内容。
