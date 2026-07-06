@@ -1,7 +1,12 @@
+# search/web/main.py
+"""统一搜索命中类型与结果过滤（对齐 open-webui retrieval/web/main.py）。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
+from urllib.parse import urlparse
+
+from search.web._filter import filter_by_domains
 
 
 @dataclass
@@ -18,7 +23,7 @@ def normalize(
     engine: str,
     url_keys: Sequence[str] = ("url", "link", "href"),
 ) -> list[dict]:
-    """Map heterogeneous provider payloads to Vestige's unified search result dict."""
+    """将各 provider 异构 payload 规范为统一 dict。"""
     out: list[dict] = []
     for item in raw:
         if item is None:
@@ -41,6 +46,7 @@ def normalize(
                 or item.get("body")
                 or item.get("summary")
                 or item.get("description")
+                or item.get("text")
                 or ""
             )
         else:
@@ -56,3 +62,23 @@ def normalize(
             }
         )
     return out
+
+
+def hits_to_dicts(hits: list[SearchHit]) -> list[dict]:
+    return [
+        {
+            "url": h.url,
+            "title": h.title,
+            "snippet": h.snippet,
+            "engine": h.engine,
+        }
+        for h in hits
+    ]
+
+
+def get_filtered_results(
+    results: list[dict],
+    filter_list: list[str] | None,
+) -> list[dict]:
+    """按域名白名单过滤（open-webui 兼容命名）。"""
+    return filter_by_domains(results, filter_list)

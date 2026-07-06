@@ -15,7 +15,7 @@ from config import (
     RELEVANCE_THRESHOLD,
     SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO,
 )
-from search.backends import get_search_backend
+from search.web.registry import get_search_client
 from search.denoise import domain_is_marketplace, host_of, is_owned_domain
 
 # 常见的跟踪类查询参数，规范化时去掉，避免同一页面因参数不同被当成不同 URL
@@ -339,7 +339,7 @@ async def search_company_footprint(
     expanded: set[str] = set()  # 已经做过 site: 深挖的域名，避免重复扩展
     expansion_blocklist = _expansion_blocklist(anchor)
     if backend is None:
-        backend = get_search_backend()
+        backend = get_search_client()
     print(f"   ↳ 使用检索后端: {backend.name}")
 
     # ---------- Round 0: Discovery ----------

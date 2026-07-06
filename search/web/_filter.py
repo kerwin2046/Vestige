@@ -12,7 +12,6 @@ def resolve_hostname(hostname: str) -> tuple[list[str], list[str]]:
 
 
 def _host_allowed(hostnames: list[str], filter_list: list[str]) -> bool:
-    """True if any hostname matches an allow-list entry (domain suffix match)."""
     for host in hostnames:
         host = host.lower()
         for entry in filter_list:
@@ -25,7 +24,6 @@ def _host_allowed(hostnames: list[str], filter_list: list[str]) -> bool:
 
 
 def filter_by_domains(results: list[dict], filter_list: list[str] | None) -> list[dict]:
-    """Keep only results whose URL host matches filter_list (optional)."""
     if not filter_list:
         return results
 

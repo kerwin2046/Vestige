@@ -14,16 +14,17 @@ SEARXNG_BASE_URL = "http://localhost:8080/search"
 # SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=默认全开，极易集体 CAPTCHA。
 # 建议只开 1 个: "bing"(中文/ site: 较好) 或 "duckduckgo"
 SEARXNG_ENGINES = "bing"
-# SearXNG 专用限流(比 ddg/brave 更保守；get_search_backend 会读取)
+# SearXNG 专用限流(比 ddg/brave 更保守；search/web/registry 会读取)
 SEARXNG_MAX_CONCURRENCY = 1
 SEARXNG_MIN_INTERVAL_SEC = 3.0
 
 # ==========================================
 # 🔌 检索后端 (Pluggable Search Backend)
 # ==========================================
-# 可选: exa / exa-mcp / searxng / ddg / brave / serper / bing / tavily / bocha
-# exa → .env 配置 EXA_API_KEY | exa-mcp → npm i -g mcporter + Exa MCP 配置
-# serper / bing → site: 深挖更稳 | tavily → AI 搜索 | bocha → 中文网页
+# 可选引擎见 search/web/registry.py KNOWN_ENGINES，例如:
+# exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
+# google_pse / perplexity / kagi / jina / mojeek
+# 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
 SEARCH_BACKEND = "exa"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
 # 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
@@ -47,6 +48,15 @@ SEARCH_MIN_INTERVAL_SEC = 2.0   # 相邻两条查询的最小间隔(秒)
 # Bing Web Search API (SEARCH_BACKEND=bing)
 BING_SEARCH_V7_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search"
 BING_LOCALE = "zh-CN"  # site: 与中文公司名可改为 zh-CN；国际公司可用 en-US
+
+# Google PSE (SEARCH_BACKEND=google_pse) — Custom Search JSON API
+# GOOGLE_PSE_API_KEY + GOOGLE_PSE_ENGINE_ID in .env；可选 GOOGLE_PSE_REFERER
+
+# Perplexity Search (SEARCH_BACKEND=perplexity) — PERPLEXITY_API_KEY in .env
+# 可选 PERPLEXITY_SEARCH_API_URL（默认 https://api.perplexity.ai/search）
+
+# Kagi / Jina / Mojeek — KAGI_SEARCH_API_KEY / JINA_API_KEY / MOJEEK_SEARCH_API_KEY
+# Jina 可选 JINA_SEARCH_BASE_URL（默认 https://s.jina.ai/）
 
 # ==========================================
 # 🔎 公司足迹检索配置 (Step A: Query Fan-out)
@@ -124,12 +134,12 @@ MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "Additive-X",
-    "official_domain": "additive-x.com",
-    "industry": "Additive Manufacturing / 3D Printing / Rapid Prototyping",
+    "name": "Fictiv",
+    "official_domain": "fictiv.com",
+    "industry": "Aerospace / Aviation / Aerospace Engineering",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
-    "aliases": ["Additive-X", "Additive-X Inc.", "Additive-X Inc"],
+    "aliases": ["Aero Consultants (UK) Ltd", "Aero Consultants (UK) Ltd Inc.", "Aero Consultants (UK) Ltd Inc"],
 }
 
 # 线索的“同一家公司”置信度阈值（0~1）：
