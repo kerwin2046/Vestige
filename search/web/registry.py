@@ -22,6 +22,7 @@ from search.web import (
     mojeek,
     perplexity,
     searxng,
+    serpapi,
     serper,
     tavily,
 )
@@ -53,6 +54,7 @@ PROVIDERS: dict[str, SearchFn] = {
     "kagi": kagi.search,
     "jina": jina.search,
     "mojeek": mojeek.search,
+    "serpapi": serpapi.search,
 }
 
 KNOWN_ENGINES: tuple[str, ...] = tuple(PROVIDERS.keys())

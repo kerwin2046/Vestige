@@ -23,9 +23,9 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # ==========================================
 # 可选引擎见 search/web/registry.py KNOWN_ENGINES，例如:
 # exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
-# google_pse / perplexity / kagi / jina / mojeek
+# google_pse / perplexity / kagi / jina / mojeek / serpapi
 # 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
-SEARCH_BACKEND = "exa"
+SEARCH_BACKEND = "google_pse"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
 # 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
 SEARCH_FALLBACK_BACKENDS = []
@@ -57,6 +57,10 @@ BING_LOCALE = "zh-CN"  # site: 与中文公司名可改为 zh-CN；国际公司�
 
 # Kagi / Jina / Mojeek — KAGI_SEARCH_API_KEY / JINA_API_KEY / MOJEEK_SEARCH_API_KEY
 # Jina 可选 JINA_SEARCH_BASE_URL（默认 https://s.jina.ai/）
+
+# SerpApi (SEARCH_BACKEND=serpapi) — SERPAPI_API_KEY in .env
+# 可选 SERPAPI_ENGINE（默认 google；亦可在 config.SERPAPI_ENGINE 设置）
+SERPAPI_ENGINE = "google"
 
 # ==========================================
 # 🔎 公司足迹检索配置 (Step A: Query Fan-out)
@@ -134,12 +138,12 @@ MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "Fictiv",
-    "official_domain": "fictiv.com",
-    "industry": "Aerospace / Aviation / Aerospace Engineering",
+    "name": "Quick CNC",
+    "official_domain": "quick-cnc.com",
+    "industry": "CNC Machining / CNC Milling / CNC Turning",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
-    "aliases": ["Aero Consultants (UK) Ltd", "Aero Consultants (UK) Ltd Inc.", "Aero Consultants (UK) Ltd Inc"],
+    "aliases": ["Quick CNC", "Quick CNC Inc.", "Quick CNC Inc"],
 }
 
 # 线索的“同一家公司”置信度阈值（0~1）：

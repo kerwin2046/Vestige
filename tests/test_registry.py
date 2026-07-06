@@ -26,6 +26,7 @@ def test_known_engines_includes_core_providers():
         "kagi",
         "jina",
         "mojeek",
+        "serpapi",
     ):
         assert name in KNOWN_ENGINES
 
@@ -100,6 +101,42 @@ async def test_search_with_fallback_uses_second_engine(monkeypatch):
     out = await client.search("test", 5)
     assert out[0]["url"] == "https://ok.com"
     assert calls == ["exa", "serper"]
+
+
+@pytest.mark.asyncio
+async def test_serpapi_parses_organic_results(monkeypatch):
+    import search.web.serpapi as sp
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "organic_results": [
+                    {"position": 2, "link": "https://b.com", "title": "B", "snippet": "sb"},
+                    {"position": 1, "link": "https://a.com", "title": "A", "snippet": "sa"},
+                ]
+            }
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            assert params["engine"] == "google"
+            return FakeResp()
+
+    monkeypatch.setenv("SERPAPI_API_KEY", "key")
+    monkeypatch.setattr(sp.httpx, "AsyncClient", lambda **kw: FakeClient())
+
+    out = await sp.search("test co", 5)
+    assert len(out) == 2
+    assert out[0]["url"] == "https://a.com"
+    assert out[0]["engine"] == "serpapi"
 
 
 def test_normalize_engine_dedupes_unknown():

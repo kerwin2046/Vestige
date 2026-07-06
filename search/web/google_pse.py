@@ -17,8 +17,8 @@ async def search(
     """Google Programmable Search Engine（Custom Search JSON API）。"""
     import os
 
-    api_key = os.getenv("GOOGLE_PSE_API_KEY", "")
-    engine_id = os.getenv("GOOGLE_PSE_ENGINE_ID", "")
+    api_key = os.getenv("GOOGLE_PSE_API_KEY", "").strip()
+    engine_id = os.getenv("GOOGLE_PSE_ENGINE_ID", "").strip()
     if not api_key or not engine_id:
         raise RuntimeError(
             "缺少 GOOGLE_PSE_API_KEY 或 GOOGLE_PSE_ENGINE_ID，请在 .env 配置后再使用 google_pse 后端"
@@ -44,7 +44,14 @@ async def search(
                 "start": str(start_index),
             }
             resp = await client.get(_GOOGLE_PSE_URL, headers=headers, params=params)
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                detail = resp.text[:300]
+                try:
+                    err = resp.json().get("error", {})
+                    detail = err.get("message") or detail
+                except Exception:
+                    pass
+                raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
             payload = resp.json()
 
             items = payload.get("items", [])
