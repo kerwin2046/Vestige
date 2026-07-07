@@ -18,7 +18,7 @@ ACTIVE_MODEL = "deepseek/deepseek-v4-flash"
 SEARXNG_BASE_URL = "http://localhost:8080/search"
 # SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=默认全开，极易集体 CAPTCHA。
 # 建议只开 1 个: "bing"(中文/ site: 较好) 或 "duckduckgo"
-SEARXNG_ENGINES = "bing"
+SEARXNG_ENGINES = ""
 # SearXNG 专用限流(比 ddg/brave 更保守；search/web/registry 会读取)
 SEARXNG_MAX_CONCURRENCY = 1
 SEARXNG_MIN_INTERVAL_SEC = 3.0
@@ -30,7 +30,7 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
 # google_pse / perplexity / kagi / jina / mojeek / serpapi
 # 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
-SEARCH_BACKEND = "searxng"
+SEARCH_BACKEND = "duckduckgo"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
 # 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
 SEARCH_FALLBACK_BACKENDS = []
