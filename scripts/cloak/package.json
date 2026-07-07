@@ -1,0 +1,10 @@
+{
+  "name": "vestige-cloak",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CloakBrowser fetch for Vestige anti-bot escalation (adapted from browser-search, MIT)",
+  "dependencies": {
+    "cloakbrowser": "0.4.8",
+    "playwright-core": "1.60.0"
+  }
+}

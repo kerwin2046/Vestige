@@ -1,4 +1,4 @@
-from crawlers.extractors import extract_json_ld, extract_opengraph
+from extract.html import extract_json_ld, extract_opengraph
 
 
 def test_extract_json_ld_parses_script_blocks():

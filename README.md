@@ -35,14 +35,18 @@
 ├── main.py                 # 入口
 ├── pipeline.py             # 编排 + 报告渲染 + Excel 落盘
 ├── config.py               # 所有配置(模型/后端/检索/BFS/锚点)
-├── search/
-│   ├── backends.py         # 可插拔检索后端 + 限流器
-│   └── search_engine.py    # 多轮 BFS、去重打分、消歧门控
-├── crawlers/
-│   └── scraper.py          # Crawl4AI 抓取
-├── llm/
-│   └── extractor.py        # 消歧打分 + 逐页结构化抽取
-├── searxng/                # 自建 SearXNG 的 docker-compose
+├── search/                 # 找 URL（BFS + 消歧门控）
+│   ├── backends.py
+│   └── search_engine.py
+├── crawler/                # 拿页面（crawl4ai → camofox → cloak）
+│   └── registry.py
+├── extract/                # 从 HTML 抽字段（json_ld / links / OG）
+│   └── html.py
+├── llm/                    # 语义理解（消歧 + 逐页抽取）
+│   └── extractor.py
+├── docker/                 # Docker 编排（SearXNG + Camofox）
+│   └── docker-compose.yml
+├── searxng/                # SearXNG 配置（被 docker/ 引用）
 ├── requirements.txt
 └── output/                 # 结构化结果 Excel(运行后生成, .gitignore)
 ```
@@ -56,7 +60,63 @@ pip install -r requirements.txt
 
 # Crawl4AI 首次使用需要装浏览器内核
 crawl4ai-setup
+
+# Cloak 反爬（npm，非 Docker）
+cd scripts/cloak && npm install
 ```
+
+## 一键启动（日常）
+
+首次准备（各做一次）：
+
+```bash
+cp .env.example .env          # 填 API keys + CAMOFOX_API_KEY
+cd scripts/cloak && npm install # Cloak 反爬（非 Docker）
+pip install -r requirements.txt && crawl4ai-setup
+```
+
+之后每次开机 / 开新项目：
+
+```bash
+make up        # 启动 SearXNG + Camofox + 健康检查
+make run       # 运行 pipeline
+```
+
+停止 Docker：
+
+```bash
+make down
+```
+
+查看状态：`make status` · 看日志：`make logs` · 全部命令：`make help`
+
+## Docker 服务（可选细节）
+
+自建检索 / Camofox 浏览器 API，统一由 `docker/` 编排：
+
+```bash
+# 等价于 make up 的核心步骤
+make docker-up-crawler
+make docker-check
+```
+
+| 服务 | 地址 | 用途 |
+|------|------|------|
+| SearXNG | `http://127.0.0.1:8080` | `SEARCH_BACKEND=searxng` |
+| Camofox | `http://127.0.0.1:9377` | crawler 链中间层 |
+| Cloak | `scripts/cloak/` (npm) | crawler 链末层，按需子进程启动 |
+
+未部署 Camofox 时可在 `config.py` 设置 `CRAWLER_CHAIN = ["crawl4ai", "cloak"]`。
+
+也可单独启动 SearXNG：`cd searxng && docker compose up -d`（与 `make docker-up` 等价）。
+
+若 SearXNG 已在 `searxng/` 跑过，再 `make docker-up-crawler` 会报容器名冲突；此时只需：
+
+```bash
+make docker-camofox   # 只起 Camofox
+```
+
+或先停旧栈再统一起：`cd searxng && docker compose down`，然后 `make docker-up-crawler`。
 
 ## 配置
 
@@ -87,19 +147,16 @@ BRAVE_API_KEY=xxx
 | `MAX_URLS_TO_CRAWL` / `MAX_CRAWL_PER_DOMAIN` | 深度抓取的成本预算(不影响足迹清单完整性) |
 | `DISCOVERY_QUERY_TEMPLATES` / `FOCUSED_QUERY_TEMPLATES` | 广度/深挖查询模板 |
 
-### 3.(可选)自建 SearXNG
+### 3.(可选) Docker 服务
 
-```bash
-cd searxng
-docker compose up -d   # 默认 http://localhost:8080
-```
+见上方 **Docker 服务** 一节；`make docker-up-crawler` 一键启动 SearXNG + Camofox。
 
 ## 使用
 
 编辑 `config.py` 里的 `COMPANY_ANCHOR` 填入目标公司,然后:
 
 ```bash
-python3 main.py
+make run
 ```
 
 控制台会打印分组后的足迹报告,同时在 `output/<公司名>.xlsx` 写入结构化结果。

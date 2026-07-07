@@ -44,6 +44,8 @@ async def test_google_pse_pagination(monkeypatch):
     calls: list[dict] = []
 
     class FakeResp:
+        status_code = 200
+
         def __init__(self, items):
             self._items = items
 

@@ -1,11 +1,11 @@
-# crawlers/extractors.py
-"""从 Crawl4AI 结果中抽取链接、JSON-LD、OpenGraph 等结构化字段。"""
+# extract/html.py
+"""从 HTML / Crawl4AI 结果中抽取链接、JSON-LD、OpenGraph 等结构化字段。"""
 from __future__ import annotations
 
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 _JSON_LD_RE = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -61,7 +61,6 @@ def extract_links(crawl_result: Any, base_url: str = "") -> list[str]:
     elif isinstance(raw, list):
         candidates.extend(_link_href(x) for x in raw)
 
-    # 部分版本把链接放在 metadata
     metadata = getattr(crawl_result, "metadata", None) or {}
     if isinstance(metadata, dict):
         for key in ("links", "internal_links", "external_links"):

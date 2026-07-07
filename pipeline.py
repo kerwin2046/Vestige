@@ -252,14 +252,25 @@ async def run_rag_pipeline(company: str | None = None) -> str:
     print(f"🔗 [Step 1 成功] 足迹清单共 {len(inventory)} 个可信来源。")
 
     # 只对多样化子集做昂贵的抓取+抽取
-    from crawlers.scraper import fetch_pages_content
+    from crawler.registry import crawl_pages
 
     subset = _select_crawl_subset(inventory, MAX_URLS_TO_CRAWL, MAX_CRAWL_PER_DOMAIN)
     print(f"\n🔍 [Step 2] 选取 {len(subset)} 个来源做深度抓取(每域名≤{MAX_CRAWL_PER_DOMAIN})...")
     urls = [r["url"] for r in subset]
-    pages = await fetch_pages_content(urls)
+    pages = await crawl_pages(urls)
     pairs = [(u, p) for u, p in zip(urls, pages) if (p.get("markdown") or "").strip()]
-    print(f"📊 [Step 2 成功] 成功抓取 {len(pairs)} 个页面。")
+    from collections import Counter
+
+    by_method = Counter(
+        p.get("crawler_method") or "unknown"
+        for _, p in pairs
+    )
+    failed = len(urls) - len(pairs)
+    print(f"📊 [Step 2 成功] 成功抓取 {len(pairs)}/{len(urls)} 个页面。")
+    if by_method:
+        print(f"   后端分布: {dict(by_method)}")
+    if failed:
+        print(f"   仍失败 {failed} 个（含 PDF/Trustpilot/Crunchbase 等难站）")
 
     enriched: dict[str, dict] = {}
     if pairs:

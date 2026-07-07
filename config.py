@@ -1,8 +1,13 @@
 # config.py
+import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 # 启动时自动加载密钥
 load_dotenv()
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
 
 # ==========================================
 # ⚙️ 模型配置 (Model Identifier)
@@ -25,7 +30,7 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
 # google_pse / perplexity / kagi / jina / mojeek / serpapi
 # 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
-SEARCH_BACKEND = "google_pse"
+SEARCH_BACKEND = "exa"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
 # 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
 SEARCH_FALLBACK_BACKENDS = []
@@ -138,12 +143,12 @@ MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "Quick CNC",
-    "official_domain": "quick-cnc.com",
-    "industry": "CNC Machining / CNC Milling / CNC Turning",
+    "name": "protolabs",
+    "official_domain": "protolabs.com",
+    "industry": "Prototyping / Rapid Prototyping / 3D Printing",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
-    "aliases": ["Quick CNC", "Quick CNC Inc.", "Quick CNC Inc"],
+    "aliases": ["Protolabs", "Protolabs Inc.", "Protolabs Inc"],
 }
 
 # 线索的“同一家公司”置信度阈值（0~1）：
@@ -181,6 +186,26 @@ DOMAIN_EXPANSION_BLOCKLIST = {
     "rocketreach.co", "zoominfo.com", "apollo.io", "lusha.com",
     "slashdot.org", "g2.com", "capterra.com", "softwareadvice.com",
 }
+
+# ==========================================
+# 📥 页面抓取 (Crawler Registry)
+# ==========================================
+# 反爬升级链：crawl4ai → camofox → cloak（仅对上一轮失败的 URL 继续尝试）
+CRAWLER_ESCALATION = True
+CRAWLER_CHAIN = ["crawl4ai", "camofox", "cloak"]
+MAX_CHARS_PER_PAGE = 6000
+
+CAMOFOX_BASE_URL = os.getenv("CAMOFOX_BASE_URL", "http://127.0.0.1:9377")
+CAMOFOX_USER_ID = os.getenv("CAMOFOX_USER_ID", "vestige")
+CAMOFOX_API_KEY = os.getenv("CAMOFOX_API_KEY", "")
+CAMOFOX_TIMEOUT_SEC = float(os.getenv("CAMOFOX_TIMEOUT_SEC", "45"))
+
+# 留空则使用 scripts/cloak/cloak-fetch.mjs
+CLOAK_SCRIPT = os.getenv(
+    "CLOAK_SCRIPT",
+    str(_PROJECT_ROOT / "scripts" / "cloak" / "cloak-fetch.mjs"),
+)
+CLOAK_TIMEOUT_SEC = float(os.getenv("CLOAK_TIMEOUT_SEC", "60"))
 
 # ==========================================
 # 💾 输出
