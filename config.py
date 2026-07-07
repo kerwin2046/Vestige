@@ -30,7 +30,7 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
 # google_pse / perplexity / kagi / jina / mojeek / serpapi
 # 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
-SEARCH_BACKEND = "exa"
+SEARCH_BACKEND = "searxng"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
 # 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
 SEARCH_FALLBACK_BACKENDS = []
@@ -143,12 +143,12 @@ MAX_TOTAL_DOMAINS_TO_EXPAND = 12
 # 解决同名歧义（如 "Protolabs" 既是工业公司，也有同名 App/游戏/无关个人）。
 # official_domain / industry / location / aliases 都可留空，但填得越多越准。
 COMPANY_ANCHOR = {
-    "name": "protolabs",
-    "official_domain": "protolabs.com",
-    "industry": "Prototyping / Rapid Prototyping / 3D Printing",
+    "name": "rpworld",
+    "official_domain": "rpworld.com",
+    "industry": "3D Printing / Additive Manufacturing / Rapid Prototyping",
     "location": "",
     # 短中文名歧义大：尽量补全称、英文名、股票简称等，显著提升消歧通过率
-    "aliases": ["Protolabs", "Protolabs Inc.", "Protolabs Inc"],
+    "aliases": ["RPWorld", "RPWorld Inc.", "RPWorld Inc"],
 }
 
 # 线索的“同一家公司”置信度阈值（0~1）：
