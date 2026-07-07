@@ -16,14 +16,15 @@ async def search(
     *,
     filter_list: list[str] | None = None,
 ) -> list[dict]:
-    from config import SEARXNG_BASE_URL, SEARXNG_ENGINES
+    from config import SEARXNG_BASE_URL, SEARXNG_ENGINES, SEARXNG_LANGUAGE
 
     engines = (SEARXNG_ENGINES or "").strip()
+    language = (SEARXNG_LANGUAGE or "en").strip() or "en"
     params = {
         "q": query,
         "format": "json",
         "categories": "general",
-        "language": "all",
+        "language": language,
         "safesearch": 0,
     }
     if engines:

@@ -16,9 +16,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parent
 ACTIVE_MODEL = "deepseek/deepseek-v4-flash"
 
 SEARXNG_BASE_URL = "http://localhost:8080/search"
-# SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=默认全开，极易集体 CAPTCHA。
-# 建议只开 1 个: "bing"(中文/ site: 较好) 或 "duckduckgo"
+# SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=实例内全部已启用引擎。
+# 建议只开 1 个稳定引擎，避免 brave/startpage 在 zh-CN 下集体失败。
 SEARXNG_ENGINES = ""
+# API 请求语言：en / all 最稳；zh-CN 易导致上游解析错误与 CAPTCHA
+SEARXNG_LANGUAGE = "en"
 # SearXNG 专用限流(比 ddg/brave 更保守；search/web/registry 会读取)
 SEARXNG_MAX_CONCURRENCY = 1
 SEARXNG_MIN_INTERVAL_SEC = 3.0

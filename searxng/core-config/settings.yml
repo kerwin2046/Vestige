@@ -4,9 +4,28 @@
 use_default_settings: true
 
 search:
+  # 默认英文；auto/zh-CN 易让 startpage/google 解析失败、brave 限流
+  default_lang: "en"
+  languages:
+    - all
+    - en
+    - en-US
+    - zh-CN
   formats:
     - html
     - json
+
+# 在默认引擎列表上关闭不稳定项；其余（duckduckgo、bing 等）仍可用
+# engines:
+#   - name: brave
+#     engine: brave
+#     disabled: true
+#   - name: startpage
+#     engine: startpage
+#     disabled: true
+#   - name: google
+#     engine: google
+#     disabled: true
 
 server:
   secret_key: "WaHqeaZIguEoia9Vf6oclbNDLHKpYFCb"
