@@ -13,7 +13,7 @@
 1. **多轮 BFS 来源发现**:用少量高覆盖查询广度发现"哪些来源在提这家公司",再针对发现的域名动态深挖,一轮轮顺藤摸瓜(受深度/预算刹车控制)。
 2. **身份消歧**:基于身份锚点(官网域名/行业/地区)判断每条线索"是不是同一家公司",过滤同名 App、游戏、无关个人等噪声。
 3. **结构化抽取**:对多样化子集抓取网页,用 LLM 按固定 schema 抽取(来源类型、所有权、联系方式、证据片段)。
-4. **输出**:一份完整的足迹清单(控制台报告 + 结构化 JSON)。
+4. **输出**:一份完整的足迹清单(控制台报告 + Excel 文件)。
 
 ## 架构 / 流水线
 
@@ -33,18 +33,22 @@
 ```
 .
 ├── main.py                 # 入口
-├── pipeline.py             # 编排 + 报告渲染 + JSON 落盘
+├── pipeline.py             # 编排 + 报告渲染 + Excel 落盘
 ├── config.py               # 所有配置(模型/后端/检索/BFS/锚点)
-├── search/
-│   ├── backends.py         # 可插拔检索后端 + 限流器
-│   └── search_engine.py    # 多轮 BFS、去重打分、消歧门控
-├── crawlers/
-│   └── scraper.py          # Crawl4AI 抓取
-├── llm/
-│   └── extractor.py        # 消歧打分 + 逐页结构化抽取
-├── searxng/                # 自建 SearXNG 的 docker-compose
+├── search/                 # 找 URL（BFS + 消歧门控）
+│   ├── backends.py
+│   └── search_engine.py
+├── crawler/                # 拿页面（crawl4ai → camofox → cloak）
+│   └── registry.py
+├── extract/                # 从 HTML 抽字段（json_ld / links / OG）
+│   └── html.py
+├── llm/                    # 语义理解（消歧 + 逐页抽取）
+│   └── extractor.py
+├── docker/                 # Docker 编排（SearXNG + Camofox）
+│   └── docker-compose.yml
+├── searxng/                # SearXNG 配置（被 docker/ 引用）
 ├── requirements.txt
-└── output/                 # 结构化结果 JSON(运行后生成, .gitignore)
+└── output/                 # 结构化结果 Excel(运行后生成, .gitignore)
 ```
 
 ## 安装
@@ -56,7 +60,63 @@ pip install -r requirements.txt
 
 # Crawl4AI 首次使用需要装浏览器内核
 crawl4ai-setup
+
+# Cloak 反爬（npm，非 Docker）
+cd scripts/cloak && npm install
 ```
+
+## 一键启动（日常）
+
+首次准备（各做一次）：
+
+```bash
+cp .env.example .env          # 填 API keys + CAMOFOX_API_KEY
+cd scripts/cloak && npm install # Cloak 反爬（非 Docker）
+pip install -r requirements.txt && crawl4ai-setup
+```
+
+之后每次开机 / 开新项目：
+
+```bash
+make up        # 启动 SearXNG + Camofox + 健康检查
+make run       # 运行 pipeline
+```
+
+停止 Docker：
+
+```bash
+make down
+```
+
+查看状态：`make status` · 看日志：`make logs` · 全部命令：`make help`
+
+## Docker 服务（可选细节）
+
+自建检索 / Camofox 浏览器 API，统一由 `docker/` 编排：
+
+```bash
+# 等价于 make up 的核心步骤
+make docker-up-crawler
+make docker-check
+```
+
+| 服务 | 地址 | 用途 |
+|------|------|------|
+| SearXNG | `http://127.0.0.1:8080` | `SEARCH_BACKEND=searxng` |
+| Camofox | `http://127.0.0.1:9377` | crawler 链中间层 |
+| Cloak | `scripts/cloak/` (npm) | crawler 链末层，按需子进程启动 |
+
+未部署 Camofox 时可在 `config.py` 设置 `CRAWLER_CHAIN = ["crawl4ai", "cloak"]`。
+
+也可单独启动 SearXNG：`cd searxng && docker compose up -d`（与 `make docker-up` 等价）。
+
+若 SearXNG 已在 `searxng/` 跑过，再 `make docker-up-crawler` 会报容器名冲突；此时只需：
+
+```bash
+make docker-camofox   # 只起 Camofox
+```
+
+或先停旧栈再统一起：`cd searxng && docker compose down`，然后 `make docker-up-crawler`。
 
 ## 配置
 
@@ -76,30 +136,30 @@ BRAVE_API_KEY=xxx
 | 配置 | 说明 |
 |---|---|
 | `ACTIVE_MODEL` | litellm 模型名,如 `deepseek/deepseek-chat`、`openai/gpt-4o` |
-| `SEARCH_BACKEND` | `ddg` / `searxng` / `brave`,一行切换检索源 |
+| `SEARCH_BACKEND` | `exa` / `ddg` / `searxng` / `brave`,一行切换检索源 |
 | `SEARCH_MAX_CONCURRENCY` / `SEARCH_MIN_INTERVAL_SEC` | 检索限流(避免被上游反爬) |
 | `COMPANY_ANCHOR` | 目标公司身份锚点(名称/官网/行业/地区/别名),消歧的基准 |
 | `RELEVANCE_THRESHOLD` | 置信度阈值,低于则过滤、且不进 BFS 扩展 |
+| `SCORE_LEADS_BATCH_SIZE` | LLM 消歧每批线索数(过大易触发上游 500) |
+| `SCORE_LEADS_MAX_RETRIES` / `SCORE_LEADS_RETRY_BACKOFF_SEC` | 消歧 5xx/超时重试 |
+| `SCORE_LEADS_BFS_ABORT_UNSCORED_RATIO` | 未评分线索占比超此值则停止 BFS |
 | `MAX_BFS_ROUNDS` / `MAX_DOMAINS_PER_ROUND` / `MAX_TOTAL_DOMAINS_TO_EXPAND` | BFS 三道刹车 |
 | `MAX_URLS_TO_CRAWL` / `MAX_CRAWL_PER_DOMAIN` | 深度抓取的成本预算(不影响足迹清单完整性) |
 | `DISCOVERY_QUERY_TEMPLATES` / `FOCUSED_QUERY_TEMPLATES` | 广度/深挖查询模板 |
 
-### 3.(可选)自建 SearXNG
+### 3.(可选) Docker 服务
 
-```bash
-cd searxng
-docker compose up -d   # 默认 http://localhost:8080
-```
+见上方 **Docker 服务** 一节；`make docker-up-crawler` 一键启动 SearXNG + Camofox。
 
 ## 使用
 
 编辑 `config.py` 里的 `COMPANY_ANCHOR` 填入目标公司,然后:
 
 ```bash
-python3 main.py
+make run
 ```
 
-控制台会打印分组后的足迹报告,同时在 `output/<公司名>.json` 写入结构化结果。
+控制台会打印分组后的足迹报告,同时在 `output/<公司名>.xlsx` 写入结构化结果。
 
 ## 输出
 
@@ -118,61 +178,35 @@ python3 main.py
 ...
 ```
 
-### JSON(`output/<公司名>.json`)
+### Excel (`output/<公司名>.xlsx`)
 
-```json
-{
-  "company": "Protolabs",
-  "anchor": { "name": "Protolabs", "official_domain": "protolabs.com", "...": "..." },
-  "generated_at": "2026-06-30T...Z",
-  "search_backend": "ddg",
-  "summary": {
-    "total_sources": 42,
-    "deep_extracted": 15,
-    "by_source_type": { "owned": 6, "social": 4, "reference": 3, "...": 0 },
-    "by_ownership": { "first_party": 12, "third_party": 28, "unknown": 2 }
-  },
-  "sources": [
-    {
-      "url": "https://www.protolabs.com/",
-      "domain": "protolabs.com",
-      "source_type": "owned",
-      "ownership": "first_party",
-      "confidence": 1.0,
-      "title": "...", "snippet": "...",
-      "score": 2.37, "weighted_score": 2.37,
-      "matched_queries": ["\"Protolabs\""],
-      "engines": ["duckduckgo"],
-      "deep_extracted": true,
-      "detail": {
-        "company_name_on_page": "Protolabs",
-        "profile_or_handle": "",
-        "contacts": { "email": "", "phone": "" },
-        "evidence_snippet": "...",
-        "is_same_company_confidence": 0.95
-      }
-    }
-  ]
-}
-```
+三个工作表:
 
-> `sources` 包含**全部**通过置信度的来源(足迹清单不设上限);未做深度抽取的来源 `detail` 为 `null`。
+| 工作表 | 内容 |
+|--------|------|
+| **摘要** | 公司信息、生成时间、来源类型/归属统计 |
+| **足迹清单** | 全部可信来源(URL 可点击)，含深度抽取的联系方式与证据 |
+| **平台聚合** | 名录/B2B 类来源按平台汇总 |
+
+> **足迹清单**包含全部通过置信度的来源;未做深度抽取的行，深度相关列为空。
 
 ## 检索后端说明
 
 | 后端 | 特点 | 适用 |
 |---|---|---|
-| `ddg` | DuckDuckGo(`ddgs` 库),免费免 key | 默认,日常自用 |
-| `searxng` | 自建元搜索,聚合多引擎 | 想自控引擎组合 |
-| `brave` | 带 key 的 Brave Search API,稳定不 CAPTCHA | 上量 / 生产 |
+| `exa` | Exa 神经搜索 API,稳定、支持 `include_domains` | **推荐**,替代 DDG/SearXNG |
+| `ddg` | DuckDuckGo(`ddgs` 库),免费免 key | 原型/备用 |
+| `searxng` | 自建元搜索,聚合多引擎 | 易 CAPTCHA,不推荐高频 BFS |
+| `brave` | Brave Search API,稳定 | 上量 / 生产 |
 
-**限流提醒**:`ddg` 与 `searxng` 本质都是用你的单 IP 实时爬网页搜索,高频会触发上游 CAPTCHA/限流。本项目已内置并发上限 + 请求间隔;若仍被限,降低并发、等待恢复,或切换到 `brave`。
-此外 `filetype:` / `site:` 等高级语法在 DDG 上支持较弱,换 `brave`/`bing` 类后端更可靠。
+**限流提醒**:`ddg` 与 `searxng` 易被 CAPTCHA;推荐 `exa`(`.env` 配 `EXA_API_KEY`)或 `brave`。
+`site:` 查询在 Exa 后端会自动转为 `include_domains`。
 
 ## 注意事项
 
 - 这是一个研究/自用性质的情报聚合工具,请遵守各平台 ToS 与当地数据合规要求。
 - LinkedIn/Facebook 等平台对爬虫敏感,直接抓取常拿不到完整内容,通常只能依赖搜索摘要。
+- LLM 消歧失败时线索保持 `confidence=None`,不会默认 0.5 放行 BFS;请检查 `ACTIVE_MODEL` 与 API 可用性,或调小 `SCORE_LEADS_BATCH_SIZE`。
 
 ## 技术栈
 
