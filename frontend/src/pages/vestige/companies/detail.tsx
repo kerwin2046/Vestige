@@ -264,9 +264,12 @@ export default function CompanyDetailPage() {
 	const signalSources = signalsQuery.data ?? [];
 
 	const runMutation = useMutation({
-		mutationFn: () => vestigeService.createRun(id, {}),
+		mutationFn: () =>
+			vestigeService.createRun(id, {
+				lanes: ["footprint", "channels", "owned"],
+			}),
 		onSuccess: async () => {
-			message.success("Footprint discovery run queued");
+			message.success("Multi-lane discovery run queued");
 			await queryClient.invalidateQueries({ queryKey: ["runs", id] });
 			await queryClient.invalidateQueries({ queryKey: ["runs"] });
 		},

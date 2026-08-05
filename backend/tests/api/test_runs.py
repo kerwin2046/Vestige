@@ -27,6 +27,12 @@ def test_create_list_get_and_cancel_run(tmp_path):
         assert run["stage"] == "queued"
         assert run["progress"] == 0
         assert run["settings_snapshot"]["search_backend"] == "exa"
+        assert run["settings_snapshot"]["lanes"] == [
+            "footprint",
+            "channels",
+            "owned",
+        ]
+        assert run["settings_snapshot"]["kind"] == "discovery"
 
         listed = client.get("/api/runs")
         assert [item["id"] for item in listed.json()["data"]] == [run["id"]]

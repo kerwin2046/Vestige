@@ -1,4 +1,4 @@
-.PHONY: help up down run api web worker import-output import-intel import-b2b sync-companies sync-expomind scaffold-agents status logs \
+.PHONY: help up down run api web worker import-output import-intel import-b2b import-competitors sync-companies sync-expomind scaffold-agents status logs \
 	docker-up docker-up-crawler docker-camofox docker-down docker-check docker-logs
 
 # 全部 Python 代码在 backend/；以前端 frontend/ 对称。
@@ -45,6 +45,10 @@ import-intel:
 import-b2b:
 	python3 -m scripts.import_b2b_db
 
+# 导入同行 Excel（竞品 Targets）：同行列表 + 中国同行背调
+import-competitors:
+	python3 -m scripts.import_competitor_xlsx
+
 # 为已有公司批量生成 OpenClaw agent 目录
 scaffold-agents:
 	python3 -m scripts.scaffold_agents
@@ -63,6 +67,7 @@ help:
 	@echo "  make import-output   导入 output/ 历史 Excel/JSON 到 SQLite"
 	@echo "  make import-intel      导入 competitive-intel/intel.db 到 Vestige"
 	@echo "  make import-b2b        导入 B2B Radar 平台/协会到 Channels"
+	@echo "  make import-competitors 导入同行 Excel 为竞品 Targets"
 	@echo "  make sync-companies    同步 Vestige ↔ MfgRadar 公司主数据"
 	@echo "  make sync-expomind     同步 ExpoMind 竞品/高优潜客（分层）"
 	@echo "  make scaffold-agents   为已有公司生成 OpenClaw agent 目录"

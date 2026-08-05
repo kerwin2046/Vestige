@@ -4,7 +4,7 @@ import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Empty, Progress, Radio, Select, Space, Table, message } from "antd";
+import { Alert, Empty, Progress, Radio, Select, Space, Table, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
 	Activity,
@@ -203,6 +203,15 @@ export default function RunsPage() {
 					</Button>
 				</div>
 			</div>
+
+			{(statusCounts.queued ?? 0) > 0 && (statusCounts.running ?? 0) === 0 && (
+				<Alert
+					type="info"
+					showIcon
+					message={`${statusCounts.queued} run(s) queued`}
+					description="Ensure `make worker` is running — the API only enqueues jobs; the worker consumes them."
+				/>
+			)}
 
 			{/* Filter Radio Group */}
 			<Card className="border-slate-200 dark:border-slate-800 shadow-xs">

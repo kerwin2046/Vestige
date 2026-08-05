@@ -88,6 +88,8 @@ class RunCreate(BaseModel):
 
     search_backend: str | None = None
     max_urls_to_crawl: int | None = Field(default=None, ge=0, le=500)
+    lanes: list[str] | None = None
+    channel_limit: int | None = Field(default=None, ge=1, le=100)
 
     def snapshot(self) -> dict:
         data = {
@@ -95,7 +97,8 @@ class RunCreate(BaseModel):
             for key, value in self.model_dump().items()
             if value is not None
         }
-        data.setdefault("kind", "footprint")
+        data.setdefault("kind", "discovery")
+        data.setdefault("lanes", ["footprint", "channels", "owned"])
         return data
 
 

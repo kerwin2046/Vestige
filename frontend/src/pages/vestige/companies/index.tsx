@@ -158,7 +158,9 @@ export default function CompaniesPage() {
 	const runMutation = useMutation({
 		mutationFn: async (companyId: string) => {
 			await vestigeService.promoteCompany(companyId, "monitoring");
-			return vestigeService.createRun(companyId, {});
+			return vestigeService.createRun(companyId, {
+				lanes: ["footprint", "channels", "owned"],
+			});
 		},
 		onSuccess: async () => {
 			message.success("Footprint discovery queued");

@@ -65,7 +65,9 @@ describe("Companies page", () => {
 
 		await waitFor(() => {
 			expect(vestigeService.promoteCompany).toHaveBeenCalledWith("company-1", "monitoring");
-			expect(vestigeService.createRun).toHaveBeenCalledWith("company-1", {});
+			expect(vestigeService.createRun).toHaveBeenCalledWith("company-1", {
+				lanes: ["footprint", "channels", "owned"],
+			});
 		});
 	});
 

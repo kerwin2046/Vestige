@@ -98,6 +98,14 @@ export default function RunDetailPage() {
 	const canCancel = run.status === "queued" || run.status === "running";
 	const canRetry = run.status === "failed" || run.status === "cancelled";
 	const currentStepIndex = getStageStepIndex(run.stage, run.status);
+	const laneResults = run.settings_snapshot?.lane_results || {};
+	const configuredLanes =
+		(run.settings_snapshot?.lanes as string[] | undefined) ||
+		Object.keys(laneResults);
+	const runWarning =
+		typeof run.settings_snapshot?.warning === "string"
+			? run.settings_snapshot.warning
+			: null;
 
 	const sourceColumns: ColumnsType<RunSource> = [
 		{
@@ -258,7 +266,7 @@ export default function RunDetailPage() {
 						items={[
 							{ title: "Created", description: "Job enqueued" },
 							{ title: "Queued", description: "Worker pickup" },
-							{ title: "Searching", description: "SERP discovery" },
+							{ title: "Searching", description: "Multi-lane discovery" },
 							{ title: "Crawling", description: "HTML extraction" },
 							{ title: "Disambiguation", description: "LLM scoring" },
 							{ title: "Persisted", description: "Saved to DB" },
@@ -267,7 +275,64 @@ export default function RunDetailPage() {
 				</CardContent>
 			</Card>
 
-			{/* Error Banner if failed */}
+			{/* Lane status */}
+			{(configuredLanes.length > 0 || Object.keys(laneResults).length > 0) && (
+				<Card className="border-slate-200 dark:border-slate-800 shadow-xs">
+					<CardHeader className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-row items-center justify-between">
+						<div>
+							<CardTitle className="text-sm font-semibold flex items-center gap-2">
+								<Layers className="h-4 w-4 text-slate-500" />
+								Discovery Lanes
+							</CardTitle>
+							<p className="text-xs text-slate-400 mt-0.5">
+								Footprint SERP, channel site: search, and owned-domain seed
+							</p>
+						</div>
+					</CardHeader>
+					<CardContent className="p-4">
+						<div className="grid gap-3 sm:grid-cols-3">
+							{(configuredLanes.length
+								? configuredLanes
+								: ["footprint", "channels", "owned"]
+							).map((lane) => {
+								const info = laneResults[lane];
+								const status = info?.status || (run.status === "queued" || run.status === "running" ? "pending" : "—");
+								const color =
+									status === "ok"
+										? "success"
+										: status === "error" || status === "empty"
+											? "error"
+											: status === "seeded" || status === "warning"
+												? "warning"
+												: "default";
+								return (
+									<div
+										key={lane}
+										className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-3"
+									>
+										<div className="flex items-center justify-between gap-2">
+											<span className="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
+												{lane}
+											</span>
+											<Tag color={color}>{status}</Tag>
+										</div>
+										<div className="mt-2 text-xs text-slate-500 font-mono">
+											{info?.source_count ?? 0} sources
+										</div>
+										{info?.error ? (
+											<p className="mt-2 text-xs text-amber-700 dark:text-amber-400 line-clamp-3">
+												{info.error}
+											</p>
+										) : null}
+									</div>
+								);
+							})}
+						</div>
+					</CardContent>
+				</Card>
+			)}
+
+			{/* Error / warning banners */}
 			{run.error && (
 				<Alert
 					type="error"
@@ -275,6 +340,22 @@ export default function RunDetailPage() {
 					message="Execution Error"
 					description={run.error}
 					className="border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30"
+				/>
+			)}
+			{runWarning && !run.error && (
+				<Alert
+					type="warning"
+					showIcon
+					message="Lane warning"
+					description={runWarning}
+				/>
+			)}
+			{run.status === "queued" && (
+				<Alert
+					type="info"
+					showIcon
+					message="Waiting for worker"
+					description="Run is queued. Ensure `make worker` is running to consume the queue."
 				/>
 			)}
 
@@ -293,6 +374,12 @@ export default function RunDetailPage() {
 							</Descriptions.Item>
 							<Descriptions.Item label="Search Backend">
 								<span className="font-mono">{run.settings_snapshot?.search_backend || "default"}</span>
+							</Descriptions.Item>
+							<Descriptions.Item label="Lanes">
+								<span className="font-mono">
+									{(run.settings_snapshot?.lanes as string[] | undefined)?.join(", ") ||
+										"footprint, channels, owned"}
+								</span>
 							</Descriptions.Item>
 							<Descriptions.Item label="Created At">{formatDateTime(run.created_at)}</Descriptions.Item>
 							<Descriptions.Item label="Finished At">{formatDateTime(run.finished_at)}</Descriptions.Item>

@@ -33,10 +33,23 @@ export type RunStatus =
 	| "cancel_requested"
 	| "cancelled";
 
+export type LaneStatus = "ok" | "empty" | "error" | "seeded" | "skipped" | string;
+
+export type LaneResult = {
+	status: LaneStatus;
+	source_count?: number;
+	error?: string | null;
+	meta?: Record<string, unknown>;
+};
+
 export type RunSettings = {
 	kind?: string;
 	search_backend?: string;
 	max_urls_to_crawl?: number;
+	lanes?: string[];
+	channel_limit?: number;
+	lane_results?: Record<string, LaneResult>;
+	warning?: string;
 	imported?: boolean;
 	source?: string;
 	[key: string]: unknown;

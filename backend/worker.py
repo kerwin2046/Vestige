@@ -6,7 +6,7 @@ import os
 import traceback
 from pathlib import Path
 
-from application.run_company import run_company
+from application.orchestrate import orchestrate_run
 from database import Database
 from models import RunStatus
 from repositories import runs as runs_repo
@@ -45,20 +45,18 @@ async def process_run(database: Database, run_id: str) -> None:
             run_id=run.id,
             stage="starting",
             message=f"Claimed run for {company.name}",
+            payload={"lanes": settings.get("lanes") or ["footprint", "channels", "owned"]},
         )
         runs_repo.update_run_progress(session, run, stage="discovering", progress=10)
 
     try:
-        outcome = await run_company(
-            name=company_payload["name"],
-            official_domain=company_payload["official_domain"],
-            industry=company_payload["industry"],
-            location=company_payload["location"],
-            aliases=company_payload["aliases"],
-            settings=settings,
-            output_dir=_run_output_dir(run_id),
-            write_excel=True,
-        )
+        with database.session_factory() as session:
+            outcome = await orchestrate_run(
+                session,
+                company=company_payload,
+                settings=settings,
+                output_dir=_run_output_dir(run_id),
+            )
     except Exception as exc:
         with database.session_factory() as session:
             run = runs_repo.get_run(session, run_id)
@@ -87,15 +85,40 @@ async def process_run(database: Database, run_id: str) -> None:
             runs_repo.mark_run_cancelled(session, run)
             return
 
-        sources = (outcome.get("result") or {}).get("sources") or []
+        sources = outcome.get("sources") or []
+        lanes = outcome.get("lanes") or {}
+        warning = outcome.get("warning")
+
+        for lane_name, lane_info in lanes.items():
+            level = "warning" if lane_info.get("status") in {"empty", "error", "seeded"} else "info"
+            runs_repo.append_run_event(
+                session,
+                run_id=run.id,
+                stage=f"lane:{lane_name}",
+                level=level,
+                message=(
+                    f"Lane {lane_name}: {lane_info.get('status')} · "
+                    f"{lane_info.get('source_count', 0)} sources"
+                    + (f" · {lane_info.get('error')}" if lane_info.get("error") else "")
+                ),
+                payload=lane_info,
+            )
+
+        snap = dict(run.settings_snapshot or {})
+        snap["lane_results"] = lanes
+        if warning:
+            snap["warning"] = warning
+        run.settings_snapshot = snap
+        session.commit()
+
         runs_repo.update_run_progress(session, run, stage="persisting", progress=90)
         runs_repo.replace_run_sources(session, run.id, sources)
         runs_repo.append_run_event(
             session,
             run_id=run.id,
             stage="persisting",
-            message=f"Persisted {len(sources)} sources",
-            payload={"source_count": len(sources)},
+            message=f"Persisted {len(sources)} sources across {len(lanes)} lanes",
+            payload={"source_count": len(sources), "lanes": lanes, "warning": warning},
         )
         runs_repo.mark_run_succeeded(
             session,
@@ -106,7 +129,9 @@ async def process_run(database: Database, run_id: str) -> None:
             session,
             run_id=run.id,
             stage="succeeded",
-            message="Run completed successfully",
+            level="warning" if warning else "info",
+            message=warning or "Run completed successfully",
+            payload={"lanes": lanes},
         )
 
 
