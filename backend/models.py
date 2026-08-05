@@ -38,6 +38,13 @@ class Company(Base):
     industry: Mapped[str] = mapped_column(String(255), default="")
     location: Mapped[str] = mapped_column(String(255), default="")
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Lifecycle: candidate (L1 pool) → target (L2 track) → monitoring (L3 active)
+    tier: Mapped[str] = mapped_column(String(32), default="target", index=True)
+    # Roles: prospect | competitor | manufacturer | partner | noise
+    roles: Mapped[list[str]] = mapped_column(JSON, default=list)
+    priority: Mapped[str] = mapped_column(String(32), default="")
+    source: Mapped[str] = mapped_column(String(64), default="manual", index=True)
+    provenance: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

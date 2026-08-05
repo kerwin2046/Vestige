@@ -1,4 +1,4 @@
-.PHONY: help up down run api web worker import-output import-intel import-b2b sync-companies scaffold-agents status logs \
+.PHONY: help up down run api web worker import-output import-intel import-b2b sync-companies sync-expomind scaffold-agents status logs \
 	docker-up docker-up-crawler docker-camofox docker-down docker-check docker-logs
 
 # 全部 Python 代码在 backend/；以前端 frontend/ 对称。
@@ -33,6 +33,10 @@ import-output:
 sync-companies:
 	python3 -m scripts.sync_company_master
 
+# ExpoMind 精选同步：竞品→Targets，Yes/High 潜客→Candidates
+sync-expomind:
+	python3 -m scripts.sync_expomind
+
 # 导入 competitive-intel/intel.db 信号到 Vestige（按竞品落成 run + sources）
 import-intel:
 	python3 -m scripts.import_intel_db
@@ -60,6 +64,7 @@ help:
 	@echo "  make import-intel      导入 competitive-intel/intel.db 到 Vestige"
 	@echo "  make import-b2b        导入 B2B Radar 平台/协会到 Channels"
 	@echo "  make sync-companies    同步 Vestige ↔ MfgRadar 公司主数据"
+	@echo "  make sync-expomind     同步 ExpoMind 竞品/高优潜客（分层）"
 	@echo "  make scaffold-agents   为已有公司生成 OpenClaw agent 目录"
 	@echo "  make down            停止 Docker 栈"
 	@echo "  make status        检查 SearXNG / Camofox / Cloak"

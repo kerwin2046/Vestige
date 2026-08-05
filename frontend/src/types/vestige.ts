@@ -4,13 +4,25 @@ export type CompanyInput = {
 	industry?: string;
 	location?: string;
 	aliases: string[];
+	tier?: CompanyTier;
+	roles?: string[];
+	priority?: string;
+	source?: string;
+	provenance?: Record<string, unknown> | null;
 };
 
-export type Company = Required<CompanyInput> & {
+export type CompanyTier = "candidate" | "target" | "monitoring";
+
+export type Company = Required<Omit<CompanyInput, "tier" | "roles" | "priority" | "source" | "provenance">> & {
 	id: string;
 	created_at: string;
 	updated_at: string;
 	agent_path?: string | null;
+	tier: CompanyTier | string;
+	roles: string[];
+	priority: string;
+	source: string;
+	provenance?: Record<string, unknown> | null;
 };
 
 export type RunStatus =

@@ -14,6 +14,7 @@ vi.mock("@/api/services/vestigeService", () => ({
 		createCompany: vi.fn(),
 		deleteCompany: vi.fn(),
 		createRun: vi.fn(),
+		promoteCompany: vi.fn(),
 	},
 }));
 
@@ -40,11 +41,16 @@ describe("Companies page", () => {
 				industry: "Manufacturing",
 				location: "US",
 				aliases: [],
+				tier: "target",
+				roles: ["competitor"],
+				priority: "High",
+				source: "manual",
 				created_at: "2026-07-21T00:00:00Z",
 				updated_at: "2026-07-21T00:00:00Z",
 			},
 		]);
 		vi.mocked(vestigeService.createRun).mockResolvedValue({} as never);
+		vi.mocked(vestigeService.promoteCompany).mockResolvedValue({} as never);
 	});
 
 	afterEach(() => {
@@ -58,6 +64,7 @@ describe("Companies page", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Start discovery" }));
 
 		await waitFor(() => {
+			expect(vestigeService.promoteCompany).toHaveBeenCalledWith("company-1", "monitoring");
 			expect(vestigeService.createRun).toHaveBeenCalledWith("company-1", {});
 		});
 	});
@@ -78,6 +85,9 @@ describe("Companies page", () => {
 				industry: "",
 				location: "",
 				aliases: [],
+				tier: "target",
+				roles: [],
+				source: "manual",
 			});
 		});
 	});

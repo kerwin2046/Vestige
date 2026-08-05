@@ -1,14 +1,43 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from models import Company
+from models import Company, utc_now
 from schemas import CompanyCreate, CompanyUpdate
 
 
-def list_companies(session: Session) -> list[Company]:
-    return list(session.scalars(select(Company).order_by(Company.created_at.desc())))
+def list_companies(
+    session: Session,
+    *,
+    tier: str | None = None,
+    role: str | None = None,
+    q: str | None = None,
+    source: str | None = None,
+) -> list[Company]:
+    stmt = select(Company)
+    if tier:
+        stmt = stmt.where(Company.tier == tier)
+    if source:
+        stmt = stmt.where(Company.source == source)
+    if q:
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Company.name.ilike(like),
+                Company.official_domain.ilike(like),
+                Company.industry.ilike(like),
+            )
+        )
+    items = list(session.scalars(stmt.order_by(Company.updated_at.desc())))
+    if role:
+        role_key = role.strip().lower()
+        items = [
+            company
+            for company in items
+            if role_key in [r.lower() for r in (company.roles or [])]
+        ]
+    return items
 
 
 def get_company(session: Session, company_id: str) -> Company | None:
@@ -33,7 +62,14 @@ def update_company(
     return company
 
 
+def promote_company(session: Session, company: Company, tier: str = "target") -> Company:
+    company.tier = tier
+    company.updated_at = utc_now()
+    session.commit()
+    session.refresh(company)
+    return company
+
+
 def delete_company(session: Session, company: Company) -> None:
     session.delete(company)
     session.commit()
-

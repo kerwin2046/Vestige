@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from application.ingest import ingest_signals
@@ -8,7 +8,13 @@ from application.scaffold_agent import scaffold_company_agent
 from database import get_session
 from repositories import companies
 from responses import success
-from schemas import CompanyCreate, CompanyRead, CompanyUpdate, IngestRequest
+from schemas import (
+    CompanyCreate,
+    CompanyPromote,
+    CompanyRead,
+    CompanyUpdate,
+    IngestRequest,
+)
 
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
@@ -18,8 +24,17 @@ def _read(company) -> dict:
 
 
 @router.get("")
-def list_all(session: Session = Depends(get_session)):
-    return success([_read(company) for company in companies.list_companies(session)])
+def list_all(
+    tier: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    items = companies.list_companies(
+        session, tier=tier, role=role, q=q, source=source
+    )
+    return success([_read(company) for company in items])
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -53,6 +68,20 @@ def update(
     if company is None:
         raise HTTPException(status_code=404, detail="company not found")
     return success(_read(companies.update_company(session, company, data)))
+
+
+@router.post("/{company_id}/promote")
+def promote(
+    company_id: str,
+    data: CompanyPromote | None = None,
+    session: Session = Depends(get_session),
+):
+    """Promote a candidate into target/monitoring (Save as Target)."""
+    company = companies.get_company(session, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="company not found")
+    tier = (data.tier if data else "target") or "target"
+    return success(_read(companies.promote_company(session, company, tier=tier)))
 
 
 @router.delete("/{company_id}")

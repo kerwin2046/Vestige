@@ -27,6 +27,7 @@ class Database:
         import models  # noqa: F401
 
         Base.metadata.create_all(self.engine)
+        _ensure_sqlite_company_columns(self.engine)
 
     def session(self) -> Generator[Session, None, None]:
         with self.session_factory() as session:
@@ -34,6 +35,37 @@ class Database:
 
     def dispose(self) -> None:
         self.engine.dispose()
+
+
+def _ensure_sqlite_company_columns(engine: Engine) -> None:
+    """Add new companies.* columns on existing SQLite DBs (create_all won't alter)."""
+    if not str(engine.url).startswith("sqlite"):
+        return
+    wanted = {
+        "tier": "VARCHAR(32) DEFAULT 'target'",
+        "roles": "JSON DEFAULT '[]'",
+        "priority": "VARCHAR(32) DEFAULT ''",
+        "source": "VARCHAR(64) DEFAULT 'manual'",
+        "provenance": "JSON",
+    }
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(companies)").fetchall()
+        if not rows:
+            return
+        existing = {row[1] for row in rows}
+        for name, ddl in wanted.items():
+            if name not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE companies ADD COLUMN {name} {ddl}")
+        # Existing rows without tier stay trackable as targets
+        conn.exec_driver_sql(
+            "UPDATE companies SET tier = 'target' WHERE tier IS NULL OR tier = ''"
+        )
+        conn.exec_driver_sql(
+            "UPDATE companies SET roles = '[]' WHERE roles IS NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE companies SET source = 'manual' WHERE source IS NULL OR source = ''"
+        )
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:

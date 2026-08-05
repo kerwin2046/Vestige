@@ -3,6 +3,7 @@ import type {
 	ChannelStats,
 	Company,
 	CompanyInput,
+	CompanyTier,
 	DashboardSummary,
 	DiscoveryRun,
 	RunSettings,
@@ -12,7 +13,12 @@ import apiClient from "../apiClient";
 
 const getDashboard = () => apiClient.get<DashboardSummary>({ url: "/dashboard" });
 
-const listCompanies = () => apiClient.get<Company[]>({ url: "/companies" });
+const listCompanies = (params?: {
+	tier?: string;
+	role?: string;
+	q?: string;
+	source?: string;
+}) => apiClient.get<Company[]>({ url: "/companies", params });
 
 const getCompany = (id: string) => apiClient.get<Company>({ url: `/companies/${id}` });
 
@@ -21,6 +27,9 @@ const createCompany = (data: CompanyInput) =>
 
 const updateCompany = (id: string, data: CompanyInput) =>
 	apiClient.put<Company>({ url: `/companies/${id}`, data });
+
+const promoteCompany = (id: string, tier: CompanyTier = "target") =>
+	apiClient.post<Company>({ url: `/companies/${id}/promote`, data: { tier } });
 
 const deleteCompany = (id: string) =>
 	apiClient.delete<{ deleted: boolean }>({ url: `/companies/${id}` });
@@ -67,6 +76,7 @@ export default {
 	getCompany,
 	createCompany,
 	updateCompany,
+	promoteCompany,
 	deleteCompany,
 	listRuns,
 	getRun,

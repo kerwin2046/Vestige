@@ -14,6 +14,11 @@ class CompanyCreate(BaseModel):
     industry: str = Field(default="", max_length=255)
     location: str = Field(default="", max_length=255)
     aliases: list[str] = Field(default_factory=list)
+    tier: str = Field(default="target", max_length=32)
+    roles: list[str] = Field(default_factory=list)
+    priority: str = Field(default="", max_length=32)
+    source: str = Field(default="manual", max_length=64)
+    provenance: dict[str, Any] | None = None
 
     @field_validator("name")
     @classmethod
@@ -33,15 +38,24 @@ class CompanyCreate(BaseModel):
         domain = (parsed.hostname or "").lower()
         return domain.removeprefix("www.")
 
-    @field_validator("aliases")
+    @field_validator("aliases", "roles")
     @classmethod
-    def normalize_aliases(cls, values: list[str]) -> list[str]:
+    def normalize_string_list(cls, values: list[str]) -> list[str]:
         result: list[str] = []
         for value in values:
-            alias = value.strip()
-            if alias and alias not in result:
-                result.append(alias)
+            item = value.strip()
+            if item and item not in result:
+                result.append(item)
         return result
+
+    @field_validator("tier")
+    @classmethod
+    def validate_tier(cls, value: str) -> str:
+        value = (value or "target").strip().lower()
+        allowed = {"candidate", "target", "monitoring"}
+        if value not in allowed:
+            raise ValueError(f"tier must be one of {sorted(allowed)}")
+        return value
 
 
 class CompanyUpdate(CompanyCreate):
@@ -54,6 +68,19 @@ class CompanyRead(CompanyCreate):
     id: str
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyPromote(BaseModel):
+    tier: str = Field(default="target", max_length=32)
+
+    @field_validator("tier")
+    @classmethod
+    def validate_tier(cls, value: str) -> str:
+        value = (value or "target").strip().lower()
+        allowed = {"candidate", "target", "monitoring"}
+        if value not in allowed:
+            raise ValueError(f"tier must be one of {sorted(allowed)}")
+        return value
 
 
 class RunCreate(BaseModel):
