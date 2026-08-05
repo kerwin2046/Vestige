@@ -32,23 +32,25 @@
 
 ```
 .
-├── main.py                 # 入口
-├── pipeline.py             # 编排 + 报告渲染 + Excel 落盘
-├── config.py               # 所有配置(模型/后端/检索/BFS/锚点)
-├── search/                 # 找 URL（BFS + 消歧门控）
-│   ├── backends.py
-│   └── search_engine.py
-├── crawler/                # 拿页面（crawl4ai → camofox → cloak）
-│   └── registry.py
-├── extract/                # 从 HTML 抽字段（json_ld / links / OG）
-│   └── html.py
-├── llm/                    # 语义理解（消歧 + 逐页抽取）
-│   └── extractor.py
-├── docker/                 # Docker 编排（SearXNG + Camofox）
-│   └── docker-compose.yml
-├── searxng/                # SearXNG 配置（被 docker/ 引用）
+├── frontend/               # Web 前端（Vite + React）
+├── backend/                # 全部 Python 后端
+│   ├── main.py             # CLI 入口
+│   ├── pipeline.py         # 编排 + 报告 + Excel
+│   ├── config.py           # 模型 / 检索 / BFS / 锚点
+│   ├── app.py              # FastAPI 应用工厂
+│   ├── worker.py           # 消费 queued runs
+│   ├── application/        # Web → pipeline 服务层
+│   ├── search/             # 找 URL（BFS + 消歧）
+│   ├── crawler/            # 抓页面
+│   ├── extract/            # HTML 抽字段
+│   ├── llm/                # 消歧 + 抽取
+│   ├── export/             # Excel 导出
+│   └── tests/
+├── docker/                 # SearXNG + Camofox
+├── searxng/                # SearXNG 配置
+├── scripts/                # Cloak 等脚本
 ├── requirements.txt
-└── output/                 # 结构化结果 Excel(运行后生成, .gitignore)
+└── output/                 # Excel + vestige.db（.gitignore）
 ```
 
 ## 安装
@@ -89,6 +91,36 @@ make down
 ```
 
 查看状态：`make status` · 看日志：`make logs` · 全部命令：`make help`
+
+## Web Admin（可视化控制台）
+
+除了 CLI（`make run`），Vestige 还提供一个 Web 控制台：管理公司、发起发现任务、查看任务与来源清单、对比历史运行。Python 全在 `backend/`，前端在 `frontend/`。
+
+首次准备（前端依赖，做一次）：
+
+```bash
+cd frontend && pnpm install
+```
+
+之后每次启动，开三个终端：
+
+```bash
+make api      # 终端 1：FastAPI 后端，http://127.0.0.1:8001
+make worker   # 终端 2：消费 queued 任务并跑 pipeline
+make web      # 终端 3：前端，http://localhost:9091
+```
+
+浏览器打开 `http://localhost:9091`，默认进入 `/dashboard`（开发模式免登录）。前端通过 Vite 代理把 `/api`、`/dev-api` 转发到后端 `:8001`。
+
+- 数据库：默认 `sqlite:///output/vestige.db`（相对仓库根目录），可用环境变量 `VESTIGE_DATABASE_URL` 覆盖。
+- Excel 导出：`output/runs/<run_id>/`（按 run 隔离，避免互相覆盖）。
+- CLI 与 Web Admin 共用同一套 pipeline；Web 侧通过 `backend/application/run_company.py` 注入公司锚点，不再依赖改 `config.py`。
+- Worker 单进程轮询：`make worker`；一次性消费：`PYTHONPATH=backend python3 -m worker --once`。
+- 历史 CLI 结果入库：`make import-output`（读取 `output/*.xlsx` / `output/*.json`，幂等可重复执行）。
+- 与 MfgRadar 公司主数据对齐：`make sync-companies`（按官网域名双向同步，不改动 MfgRadar 已有竞品名）。
+- OpenClaw 日常信号直写 Vestige DB（方案 A）：`POST /api/companies/{id}/ingest`；创建公司时自动 scaffold `~/.openclaw/workspace/agents/<slug>/`，已有公司可用 `make scaffold-agents`。
+
+> Compare API 与完整 diff 视图仍待接入；任务执行与来源落库已可由 worker 完成。
 
 ## Docker 服务（可选细节）
 

@@ -5,3 +5,6 @@ python-dotenv==1.2.2
 ddgs==9.14.4
 openpyxl==3.1.5
 exa-py==2.14.0
+fastapi==0.121.1
+SQLAlchemy==2.0.44
+uvicorn==0.38.0
