@@ -213,13 +213,17 @@ def _rank_domains(
     mp.sort(key=lambda x: x[1], reverse=True)
     other.sort(key=lambda x: x[1], reverse=True)
 
-    picked = [d for d, _ in mp[:max_marketplace]]
+    # Never exceed `limit`. Taking mp[:max_marketplace] first can make
+    # remain negative; in Python other[:-1] then returns almost everything.
+    mp_budget = min(max(0, max_marketplace), limit)
+    picked = [d for d, _ in mp[:mp_budget]]
     remain = limit - len(picked)
-    picked.extend(d for d, _ in other[:remain])
-    if len(picked) < limit:
+    if remain > 0:
+        picked.extend(d for d, _ in other[:remain])
+    if remain > 0 and len(picked) < limit:
         extra = limit - len(picked)
         already = set(picked)
-        for d, _ in mp[max_marketplace:]:
+        for d, _ in mp[mp_budget:]:
             if d not in already:
                 picked.append(d)
                 extra -= 1

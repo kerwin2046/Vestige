@@ -26,6 +26,15 @@ from search.web.registry import get_search_client
 DEFAULT_LANES = ["footprint", "channels", "owned"]
 
 
+class DiscoveryEmptyError(RuntimeError):
+    """Raised when no footprint/channels hits; may still carry owned/seed sources."""
+
+    def __init__(self, message: str, *, lanes: dict[str, Any], sources: list[dict[str, Any]]):
+        super().__init__(message)
+        self.lanes = lanes
+        self.sources = sources
+
+
 def _host(url: str) -> str:
     try:
         host = (urlsplit(url).hostname or "").lower()
@@ -141,7 +150,8 @@ async def _lane_channels(
         if ch.domain
     ]
 
-    # Bound concurrency via backend throttle; gather in chunks
+    # Bound concurrency via shared backend throttle; gather in chunks.
+    # SearXNG throttle is process-wide (≤2–3 concurrent); chunk size only batches tasks.
     hits: list[dict[str, Any]] = []
     errors: list[str] = []
     chunk_size = 8
@@ -325,10 +335,12 @@ async def orchestrate_run(
     footprint_ok = lane_summary.get("footprint", {}).get("status") == "ok"
     channels_ok = lane_summary.get("channels", {}).get("status") == "ok"
     if not footprint_ok and not channels_ok:
-        raise RuntimeError(
+        raise DiscoveryEmptyError(
             "All discovery lanes returned no usable hits "
             "(owned/channel seeds alone are not enough). "
-            + "; ".join(errors)
+            + "; ".join(errors),
+            lanes=lane_summary,
+            sources=sources,
         )
 
     warning = None

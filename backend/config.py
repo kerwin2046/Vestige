@@ -15,14 +15,16 @@ load_dotenv()  # 也允许从当前工作目录覆盖
 ACTIVE_MODEL = "deepseek/deepseek-v4-flash"
 
 SEARXNG_BASE_URL = "http://localhost:8080/search"
-# SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=实例内全部已启用引擎。
-# 建议只开 1 个稳定引擎，避免 brave/startpage 在 zh-CN 下集体失败。
+# SearXNG 单次查询只用哪些引擎(逗号分隔)。留空=实例默认引擎列表（推荐）。
+# engines= 是 VPS/已烧 IP 时的权衡（缩小到 brave,duckduckgo,wikipedia 等更耐限流的子集），
+# 不是住宅 IP + 低并发场景的默认做法。
 SEARXNG_ENGINES = ""
 # API 请求语言：en / all 最稳；zh-CN 易导致上游解析错误与 CAPTCHA
 SEARXNG_LANGUAGE = "en"
-# SearXNG 专用限流(比 ddg/brave 更保守；search/web/registry 会读取)
-SEARXNG_MAX_CONCURRENCY = 1
-SEARXNG_MIN_INTERVAL_SEC = 3.0
+# SearXNG 客户端限流：每次查询会扇出到大量上游，高并发最容易触发 CAPTCHA。
+# 建议 ≤2–3 并发、约 ≤10 次/分钟（住宅 IP）；VPS 更保守。
+SEARXNG_MAX_CONCURRENCY = 2
+SEARXNG_MIN_INTERVAL_SEC = 6.0
 
 # ==========================================
 # 🔌 检索后端 (Pluggable Search Backend)
@@ -31,10 +33,10 @@ SEARXNG_MIN_INTERVAL_SEC = 3.0
 # exa / exa-mcp / searxng / duckduckgo / brave / serper / bing / tavily / bocha
 # google_pse / perplexity / kagi / jina / mojeek / serpapi
 # 引擎实现在 search/web/，由 registry.search_web() 调度（Open WebUI 风格）
-SEARCH_BACKEND = "searxng"
+SEARCH_BACKEND = "exa"
 # 主引擎失败或 0 结果时依次尝试（逗号分隔名称，留空=不降级）
-# 示例: SEARCH_FALLBACK_BACKENDS = ["exa"]  # serper 主 + exa 备
-SEARCH_FALLBACK_BACKENDS = []
+# 示例: SEARCH_FALLBACK_BACKENDS = ["searxng"]
+SEARCH_FALLBACK_BACKENDS = ["searxng"]
 
 # Exa API — https://docs.exa.ai/reference/search-api-guide-for-coding-agents
 # type: auto(默认) | fast | instant | deep-lite | deep | deep-reasoning
@@ -48,6 +50,7 @@ MCPORTER_BIN = "mcporter"
 EXA_MCP_TIMEOUT_SEC = 60.0
 
 # 限流：避免“单 IP 高频”触发上游引擎的限流/CAPTCHA
+# 非 SearXNG 引擎默认；SearXNG 见上方 SEARXNG_*（更严）
 SEARCH_MAX_CONCURRENCY = 2      # 同时最多并发几条查询
 SEARCH_MIN_INTERVAL_SEC = 2.0   # 相邻两条查询的最小间隔(秒)
 

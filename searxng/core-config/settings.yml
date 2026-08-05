@@ -30,3 +30,4 @@ search:
 server:
   secret_key: "WaHqeaZIguEoia9Vf6oclbNDLHKpYFCb"
   image_proxy: true
+  limiter: true

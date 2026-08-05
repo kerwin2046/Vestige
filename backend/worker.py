@@ -6,7 +6,7 @@ import os
 import traceback
 from pathlib import Path
 
-from application.orchestrate import orchestrate_run
+from application.orchestrate import DiscoveryEmptyError, orchestrate_run
 from database import Database
 from models import RunStatus
 from repositories import runs as runs_repo
@@ -57,6 +57,47 @@ async def process_run(database: Database, run_id: str) -> None:
                 settings=settings,
                 output_dir=_run_output_dir(run_id),
             )
+    except DiscoveryEmptyError as exc:
+        with database.session_factory() as session:
+            run = runs_repo.get_run(session, run_id)
+            if run is None:
+                return
+            if run.status == RunStatus.CANCEL_REQUESTED:
+                runs_repo.mark_run_cancelled(session, run)
+                return
+            lanes = exc.lanes or {}
+            sources = exc.sources or []
+            snap = dict(run.settings_snapshot or {})
+            snap["lane_results"] = lanes
+            snap["warning"] = str(exc)
+            run.settings_snapshot = snap
+            session.commit()
+            if sources:
+                runs_repo.replace_run_sources(session, run.id, sources)
+            for lane_name, lane_info in lanes.items():
+                runs_repo.append_run_event(
+                    session,
+                    run_id=run.id,
+                    stage=f"lane:{lane_name}",
+                    level="warning",
+                    message=(
+                        f"Lane {lane_name}: {lane_info.get('status')} · "
+                        f"{lane_info.get('source_count', 0)} sources"
+                        + (f" · {lane_info.get('error')}" if lane_info.get("error") else "")
+                    ),
+                    payload=lane_info,
+                )
+            error = f"{type(exc).__name__}: {exc}"
+            runs_repo.append_run_event(
+                session,
+                run_id=run_id,
+                stage="failed",
+                level="error",
+                message=error,
+                payload={"lanes": lanes, "source_count": len(sources)},
+            )
+            runs_repo.mark_run_failed(session, run, error=error)
+        return
     except Exception as exc:
         with database.session_factory() as session:
             run = runs_repo.get_run(session, run_id)

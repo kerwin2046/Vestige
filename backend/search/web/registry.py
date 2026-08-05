@@ -59,6 +59,10 @@ PROVIDERS: dict[str, SearchFn] = {
 
 KNOWN_ENGINES: tuple[str, ...] = tuple(PROVIDERS.keys())
 
+# Shared per-engine throttles. Creating a new AsyncThrottle per request would
+# defeat concurrency limits under asyncio.gather (each task gets its own semaphore).
+_THROTTLES: dict[str, AsyncThrottle] = {}
+
 
 def normalize_engine(name: str) -> str:
     key = (name or "exa").lower().strip()
@@ -75,11 +79,26 @@ def _throttle_for(engine: str) -> AsyncThrottle:
         SEARXNG_MIN_INTERVAL_SEC,
     )
 
+    cached = _THROTTLES.get(engine)
+    if cached is not None:
+        return cached
+
     if engine in ("exa", "exa-mcp"):
-        return AsyncThrottle(EXA_MAX_CONCURRENCY, EXA_MIN_INTERVAL_SEC)
-    if engine == "searxng":
-        return AsyncThrottle(SEARXNG_MAX_CONCURRENCY, SEARXNG_MIN_INTERVAL_SEC)
-    return AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
+        throttle = AsyncThrottle(EXA_MAX_CONCURRENCY, EXA_MIN_INTERVAL_SEC)
+    elif engine == "searxng":
+        # SearXNG fans each query out to many upstream engines from one IP.
+        # Keep client concurrency low (≤2–3) and ≤~10 searches/min.
+        throttle = AsyncThrottle(SEARXNG_MAX_CONCURRENCY, SEARXNG_MIN_INTERVAL_SEC)
+    else:
+        throttle = AsyncThrottle(SEARCH_MAX_CONCURRENCY, SEARCH_MIN_INTERVAL_SEC)
+
+    _THROTTLES[engine] = throttle
+    return throttle
+
+
+def reset_throttles() -> None:
+    """Test helper: drop cached throttles so config monkeypatches take effect."""
+    _THROTTLES.clear()
 
 
 async def search_web(

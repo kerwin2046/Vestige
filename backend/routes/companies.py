@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from application.ingest import ingest_signals
-from application.scaffold_agent import scaffold_company_agent
+from application.openclaw_agent import run_company_openclaw_agent
+from application.scaffold_agent import agents_root, company_slug, scaffold_company_agent
 from database import get_session
 from repositories import companies
 from responses import success
@@ -20,7 +21,11 @@ router = APIRouter(prefix="/api/companies", tags=["companies"])
 
 
 def _read(company) -> dict:
-    return CompanyRead.model_validate(company).model_dump(mode="json")
+    data = CompanyRead.model_validate(company).model_dump(mode="json")
+    agent_dir = agents_root() / company_slug(company)
+    data["agent_path"] = str(agent_dir) if agent_dir.exists() else None
+    data["agent_slug"] = company_slug(company)
+    return data
 
 
 @router.get("")
@@ -119,3 +124,33 @@ def scaffold_agent(company_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="company not found")
     path = scaffold_company_agent(company)
     return success({"agent_path": str(path), "slug": path.name})
+
+
+@router.post("/{company_id}/run-agent")
+def run_agent(
+    company_id: str,
+    wait: bool = Query(default=False),
+    local: bool = Query(default=False),
+    timeout: int = Query(default=600, ge=30, le=3600),
+    session: Session = Depends(get_session),
+):
+    """Trigger OpenClaw to execute this company's agent workspace.
+
+    Default is detached (returns immediately with pid + log_path).
+    Pass wait=true to block until the OpenClaw turn finishes.
+    """
+    company = companies.get_company(session, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="company not found")
+    try:
+        result = run_company_openclaw_agent(
+            company,
+            wait=wait,
+            local=local,
+            timeout_seconds=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return success(result)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from application.orchestrate import orchestrate_run
+from application.orchestrate import DiscoveryEmptyError, orchestrate_run
 from database import Database
 from models import Channel
 
@@ -36,7 +36,7 @@ async def test_orchestrate_fails_when_all_lanes_empty(tmp_path, monkeypatch):
             "location": "",
             "aliases": [],
         }
-        with pytest.raises(RuntimeError, match="no usable hits"):
+        with pytest.raises(DiscoveryEmptyError, match="no usable hits"):
             await orchestrate_run(
                 session,
                 company=company,

@@ -216,6 +216,12 @@ export default function CompanyDetailPage() {
 	const [sourceSearch, setSourceSearch] = useState("");
 	const [sourceTypeFilter, setSourceTypeFilter] = useState("ALL");
 	const [ownershipFilter, setOwnershipFilter] = useState("ALL");
+	const [lastAgentRun, setLastAgentRun] = useState<{
+		status: string;
+		pid?: number | null;
+		log_path: string;
+		agent_path: string;
+	} | null>(null);
 
 	const companyQuery = useQuery({
 		queryKey: ["company", id],
@@ -283,6 +289,27 @@ export default function CompanyDetailPage() {
 			await queryClient.invalidateQueries({ queryKey: ["company", id] });
 		},
 		onError: (error: Error) => message.error(error.message || "Failed to scaffold agent"),
+	});
+
+	const runAgentMutation = useMutation({
+		mutationFn: () => vestigeService.runCompanyAgent(id, { wait: false }),
+		onSuccess: async (data) => {
+			setLastAgentRun({
+				status: data.status,
+				pid: data.pid,
+				log_path: data.log_path,
+				agent_path: data.agent_path,
+			});
+			message.success(
+				data.pid
+					? `OpenClaw started (pid ${data.pid}). Log: ${data.log_path}`
+					: `OpenClaw ${data.status}. Log: ${data.log_path}`,
+				5,
+			);
+			await queryClient.invalidateQueries({ queryKey: ["company", id] });
+			await queryClient.invalidateQueries({ queryKey: ["runs", id] });
+		},
+		onError: (error: Error) => message.error(error.message || "Failed to run OpenClaw agent"),
 	});
 
 	const updateMutation = useMutation({
@@ -809,7 +836,9 @@ export default function CompanyDetailPage() {
 				</CardHeader>
 				<CardContent className="p-5 flex flex-col gap-4">
 					<p className="text-xs text-slate-500">
-						Dedicated scheduled agent directory for continuous crawling, scheduled ingestion, and footprint signal updates.
+						Scaffold creates the workspace under OpenClaw. Run Agent calls{" "}
+						<code className="font-mono">openclaw agent</code> with this company&apos;s TASK.md
+						(results POST back via ingest).
 					</p>
 
 					{company.agent_path ? (
@@ -831,15 +860,44 @@ export default function CompanyDetailPage() {
 						/>
 					)}
 
-					<Button
-						variant="outline"
-						className="w-full"
-						disabled={scaffoldAgentMutation.isPending}
-						onClick={() => scaffoldAgentMutation.mutate()}
-					>
-						<Sparkles className="mr-1.5 h-4 w-4 text-blue-600" />
-						{company.agent_path ? "Re-Scaffold Agent Directory" : "Scaffold OpenClaw Agent"}
-					</Button>
+					<div className="flex flex-col gap-2">
+						<Button
+							className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+							disabled={runAgentMutation.isPending}
+							onClick={() => runAgentMutation.mutate()}
+						>
+							<Play className="mr-1.5 h-4 w-4" />
+							{runAgentMutation.isPending ? "Starting OpenClaw…" : "Run OpenClaw Agent"}
+						</Button>
+						<Button
+							variant="outline"
+							className="w-full"
+							disabled={scaffoldAgentMutation.isPending}
+							onClick={() => scaffoldAgentMutation.mutate()}
+						>
+							<Sparkles className="mr-1.5 h-4 w-4 text-blue-600" />
+							{company.agent_path ? "Re-Scaffold Agent Directory" : "Scaffold OpenClaw Agent"}
+						</Button>
+						<p className="text-[11px] text-slate-400 font-mono">
+							CLI: make run-agent DOMAIN={company.official_domain || "…"}
+						</p>
+						{lastAgentRun && (
+							<Alert
+								type="success"
+								showIcon
+								message={
+									lastAgentRun.pid
+										? `Agent started (pid ${lastAgentRun.pid})`
+										: `Agent status: ${lastAgentRun.status}`
+								}
+								description={
+									<div className="text-xs font-mono break-all">
+										log: {lastAgentRun.log_path}
+									</div>
+								}
+							/>
+						)}
+					</div>
 				</CardContent>
 			</Card>
 		</div>

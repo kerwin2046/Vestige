@@ -121,6 +121,7 @@ make web      # 终端 3：前端，http://localhost:9091
 - B2B 平台/协会渠道库：`make import-b2b`（导入 `b2b_platforms.db` 到 `channels` 表，前端 `/channels` 浏览）。
 - ExpoMind 分层同步：`make sync-expomind`（竞品 → Targets；Yes/High 潜客 → Candidates；制造=是且 lead≠No → Candidates；不全量灌展会池）。
 - OpenClaw 日常信号直写 Vestige DB（方案 A）：`POST /api/companies/{id}/ingest`；创建公司时自动 scaffold `~/.openclaw/workspace/agents/<slug>/`，已有公司可用 `make scaffold-agents`。
+- 触发 OpenClaw 跑公司 agent：`make run-agent DOMAIN=xometry.com`（或 `ID=` / `SLUG=`）；后台：`DETACH=1`；无 gateway 时：`LOCAL=1`。API：`POST /api/companies/{id}/run-agent`。
 
 Companies 分层：`candidate`（候选池）→ Save → `target`（跟踪）→ Start discovery → `monitoring`。
 
@@ -232,10 +233,11 @@ make run
 |---|---|---|
 | `exa` | Exa 神经搜索 API,稳定、支持 `include_domains` | **推荐**,替代 DDG/SearXNG |
 | `ddg` | DuckDuckGo(`ddgs` 库),免费免 key | 原型/备用 |
-| `searxng` | 自建元搜索,聚合多引擎 | 易 CAPTCHA,不推荐高频 BFS |
+| `searxng` | 自建元搜索,聚合多引擎 | 低并发可用；高并行易 CAPTCHA |
 | `brave` | Brave Search API,稳定 | 上量 / 生产 |
 
-**限流提醒**:`ddg` 与 `searxng` 易被 CAPTCHA;推荐 `exa`(`.env` 配 `EXA_API_KEY`)或 `brave`。
+**限流提醒**: SearXNG 每次查询会扇出到大量上游。住宅 IP 建议 ≤2–3 并发、约 ≤10 次/分钟（`SEARXNG_MAX_CONCURRENCY` / `SEARXNG_MIN_INTERVAL_SEC`）。`engines=` 缩小引擎集是 VPS/已烧 IP 的权衡，不是默认。仍更推荐 `exa`（`.env` 配 `EXA_API_KEY`）或带 key 的 `brave`。
+若启用实例侧保护，在 `searxng/core-config/settings.yml` 的 `server:` 下加 `limiter: true` 后重启容器。
 `site:` 查询在 Exa 后端会自动转为 `include_domains`。
 
 ## 注意事项

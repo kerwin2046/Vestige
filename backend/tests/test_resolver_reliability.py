@@ -107,6 +107,27 @@ def test_rank_domains_includes_scored_domain():
     assert picked == ["forum.example.com"]
 
 
+def test_rank_domains_never_exceeds_limit_with_marketplaces(monkeypatch):
+    """Regression: negative remain used to slice other[:-1] and return dozens."""
+    merged = {}
+    for i, host in enumerate([f"mp{i}.com" for i in range(5)] + [f"ot{i}.com" for i in range(30)]):
+        url = f"https://{host}/p"
+        merged[url] = {
+            "url": url,
+            "title": host,
+            "snippet": "",
+            "score": 10.0 - i * 0.01,
+            "confidence": 0.9,
+            "source_type": "marketplace_directory" if host.startswith("mp") else "news_media",
+        }
+
+    monkeypatch.setattr(se, "_domain_is_marketplace", lambda merged, d: d.startswith("mp"))
+    picked = se._rank_domains(
+        merged, exclude=set(), limit=2, threshold=0.5, max_marketplace=3
+    )
+    assert len(picked) <= 2
+
+
 def test_bfs_should_abort_on_total_failure():
     merged = {"a": {"url": "https://a.com", "confidence": None}}
     assert se._bfs_should_abort(merged, scored=0, pending=10) is True

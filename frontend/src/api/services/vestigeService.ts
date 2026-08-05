@@ -70,6 +70,22 @@ const scaffoldCompanyAgent = (id: string) =>
 		url: `/companies/${id}/scaffold-agent`,
 	});
 
+const runCompanyAgent = (
+	id: string,
+	params?: { wait?: boolean; local?: boolean; timeout?: number },
+) =>
+	apiClient.post<{
+		status: string;
+		pid?: number | null;
+		log_path: string;
+		agent_path: string;
+		command: string[];
+		slug: string;
+	}>({
+		url: `/companies/${id}/run-agent`,
+		params,
+	});
+
 export default {
 	getDashboard,
 	listCompanies,
@@ -87,4 +103,5 @@ export default {
 	listChannels,
 	getChannelStats,
 	scaffoldCompanyAgent,
+	runCompanyAgent,
 };
