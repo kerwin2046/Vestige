@@ -1,4 +1,6 @@
 import type {
+	Channel,
+	ChannelStats,
 	Company,
 	CompanyInput,
 	DashboardSummary,
@@ -43,6 +45,22 @@ const retryRun = (id: string) =>
 const listRunSources = (id: string) =>
 	apiClient.get<RunSource[]>({ url: `/runs/${id}/sources` });
 
+const listChannels = (params?: {
+	kind?: string;
+	q?: string;
+	industry?: string;
+	country?: string;
+	limit?: number;
+	offset?: number;
+}) => apiClient.get<Channel[]>({ url: "/channels", params });
+
+const getChannelStats = () => apiClient.get<ChannelStats>({ url: "/channels/stats" });
+
+const scaffoldCompanyAgent = (id: string) =>
+	apiClient.post<{ agent_path: string; slug: string }>({
+		url: `/companies/${id}/scaffold-agent`,
+	});
+
 export default {
 	getDashboard,
 	listCompanies,
@@ -56,5 +74,7 @@ export default {
 	cancelRun,
 	retryRun,
 	listRunSources,
+	listChannels,
+	getChannelStats,
+	scaffoldCompanyAgent,
 };
-

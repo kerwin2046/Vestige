@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import Database, get_session
 from responses import success
+from routes.channels import router as channels_router
 from routes.companies import router as companies_router
 from routes.dashboard import router as dashboard_router
 from routes.runs import router as runs_router
@@ -41,6 +42,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return success({"status": "ok"})
 
     app.include_router(companies_router)
+    app.include_router(channels_router)
     app.include_router(dashboard_router)
     app.include_router(runs_router)
 

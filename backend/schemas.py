@@ -115,3 +115,23 @@ class RunSourceRead(BaseModel):
     bfs_round: int
     detail: dict[str, Any] | None = None
 
+
+class ChannelRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    name: str
+    url: str
+    domain: str
+    industry: str
+    country: str
+    channel_type: str
+    score: float
+    status: str
+    source: str
+    has_member_directory: int
+    detail: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+

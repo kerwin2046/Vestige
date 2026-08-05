@@ -3,22 +3,27 @@ import type { NavProps } from "@/components/nav";
 
 export const frontendNavData: NavProps["data"] = [
 	{
-		name: "Vestige",
+		name: "Workspace",
 		items: [
 			{
 				title: "Overview",
 				path: "/dashboard",
-				icon: <Icon icon="solar:chart-2-bold-duotone" size="24" />,
+				icon: <Icon icon="solar:widget-add-bold-duotone" size="22" />,
 			},
 			{
 				title: "Companies",
 				path: "/companies",
-				icon: <Icon icon="solar:buildings-2-bold-duotone" size="24" />,
+				icon: <Icon icon="solar:buildings-2-bold-duotone" size="22" />,
 			},
 			{
-				title: "Runs",
+				title: "Channels",
+				path: "/channels",
+				icon: <Icon icon="solar:radar-2-bold-duotone" size="22" />,
+			},
+			{
+				title: "Discovery Runs",
 				path: "/runs",
-				icon: <Icon icon="solar:history-bold-duotone" size="24" />,
+				icon: <Icon icon="solar:history-bold-duotone" size="22" />,
 			},
 		],
 	},

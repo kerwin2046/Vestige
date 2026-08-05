@@ -70,3 +70,30 @@ export type RunSource = {
 	detail: Record<string, unknown> | null;
 };
 
+export type ChannelKind = "platform" | "association";
+
+export type Channel = {
+	id: string;
+	kind: ChannelKind | string;
+	name: string;
+	url: string;
+	domain: string;
+	industry: string;
+	country: string;
+	channel_type: string;
+	score: number;
+	status: string;
+	source: string;
+	has_member_directory: number;
+	detail: Record<string, unknown> | null;
+	created_at: string;
+	updated_at: string;
+};
+
+export type ChannelStats = {
+	total: number;
+	platform_count: number;
+	association_count: number;
+	with_member_directory: number;
+};
+

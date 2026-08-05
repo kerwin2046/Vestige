@@ -126,3 +126,29 @@ class RunEvent(Base):
 
     run: Mapped[Run] = relationship(back_populates="events")
 
+
+class Channel(Base):
+    """B2B platforms and industry associations used as discovery channels."""
+
+    __tablename__ = "channels"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # platform | association
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    url: Mapped[str] = mapped_column(Text, default="")
+    domain: Mapped[str] = mapped_column(String(255), index=True, default="")
+    industry: Mapped[str] = mapped_column(String(255), default="", index=True)
+    country: Mapped[str] = mapped_column(String(128), default="", index=True)
+    channel_type: Mapped[str] = mapped_column(String(128), default="")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(64), default="active", index=True)
+    source: Mapped[str] = mapped_column(String(64), default="b2b-radar", index=True)
+    has_member_directory: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+

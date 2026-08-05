@@ -28,7 +28,7 @@ export const AntdAdapter: UILibraryAdapter = ({ mode, children }) => {
 
 		colorBgLayout: colorTokens.background.default,
 		colorBgContainer: colorTokens.background.paper,
-		colorBgElevated: colorTokens.background.default,
+		colorBgElevated: colorTokens.background.paper,
 
 		wireframe: false,
 		fontFamily: fontFamily,
@@ -53,6 +53,22 @@ export const AntdAdapter: UILibraryAdapter = ({ mode, children }) => {
 		Layout: {
 			siderBg: darkColorTokens.background.default,
 		},
+		Table: {
+			headerBg: mode === ThemeMode.Light ? "#f8fafc" : "#1e293b",
+			headerColor: colorTokens.text.secondary,
+			headerSplitColor: "transparent",
+			rowHoverBg: mode === ThemeMode.Light ? "#f1f5f9" : "#334155",
+			borderColor: mode === ThemeMode.Light ? "#e2e8f0" : "#334155",
+			fontSize: 13,
+		},
+		Tabs: {
+			titleFontSize: 14,
+			itemSelectedColor: primaryColorToken.default,
+			cardBg: "transparent",
+		},
+		Card: {
+			headerBg: "transparent",
+		},
 	};
 
 	return (
@@ -62,7 +78,7 @@ export const AntdAdapter: UILibraryAdapter = ({ mode, children }) => {
 			tag={{
 				style: {
 					borderRadius: removePx(baseThemeTokens.borderRadius.md),
-					fontWeight: 700,
+					fontWeight: 600,
 					padding: `0 ${baseThemeTokens.spacing[1]}`,
 					margin: `0 ${baseThemeTokens.spacing[1]}`,
 					borderWidth: 0,

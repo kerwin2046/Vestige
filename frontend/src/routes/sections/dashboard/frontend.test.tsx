@@ -24,6 +24,7 @@ describe("Vestige product shell", () => {
 
 		expect(paths).toContain("/dashboard");
 		expect(paths).toContain("/companies");
+		expect(paths).toContain("/channels");
 		expect(paths).toContain("/runs");
 		expect(paths).toContain("/runs/:id");
 		expect(paths).toContain("/companies/:id/compare");
@@ -31,9 +32,8 @@ describe("Vestige product shell", () => {
 	});
 
 	it("uses product navigation and branding", () => {
-		expect(navPaths()).toEqual(["/dashboard", "/companies", "/runs"]);
+		expect(navPaths()).toEqual(["/dashboard", "/companies", "/channels", "/runs"]);
 		expect(GLOBAL_CONFIG.appName).toBe("Vestige");
 		expect(GLOBAL_CONFIG.defaultRoute).toBe("/dashboard");
 	});
 });
-

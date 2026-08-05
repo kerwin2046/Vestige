@@ -118,6 +118,7 @@ make web      # 终端 3：前端，http://localhost:9091
 - Worker 单进程轮询：`make worker`；一次性消费：`PYTHONPATH=backend python3 -m worker --once`。
 - 历史 CLI 结果入库：`make import-output`（读取 `output/*.xlsx` / `output/*.json`，幂等可重复执行）。
 - 与 MfgRadar 公司主数据对齐：`make sync-companies`（按官网域名双向同步，不改动 MfgRadar 已有竞品名）。
+- B2B 平台/协会渠道库：`make import-b2b`（导入 `b2b_platforms.db` 到 `channels` 表，前端 `/channels` 浏览）。
 - OpenClaw 日常信号直写 Vestige DB（方案 A）：`POST /api/companies/{id}/ingest`；创建公司时自动 scaffold `~/.openclaw/workspace/agents/<slug>/`，已有公司可用 `make scaffold-agents`。
 
 > Compare API 与完整 diff 视图仍待接入；任务执行与来源落库已可由 worker 完成。
