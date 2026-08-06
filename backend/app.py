@@ -12,6 +12,7 @@ from routes.channels import router as channels_router
 from routes.companies import router as companies_router
 from routes.dashboard import router as dashboard_router
 from routes.runs import router as runs_router
+from routes.signals import router as signals_router
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -45,6 +46,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(channels_router)
     app.include_router(dashboard_router)
     app.include_router(runs_router)
+    app.include_router(signals_router)
 
     return app
 

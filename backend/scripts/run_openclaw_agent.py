@@ -19,6 +19,10 @@ from sqlalchemy import select
 
 from application.openclaw_agent import run_company_openclaw_agent
 from application.scaffold_agent import company_slug
+from application.signals_collector import (
+    run_shared_collector_for_company,
+    use_shared_collector_by_default,
+)
 from database import Database
 from models import Company
 
@@ -90,6 +94,16 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Do not refresh scaffold files before running",
     )
+    parser.add_argument(
+        "--shared",
+        action="store_true",
+        help="Force shared signals-collector workspace",
+    )
+    parser.add_argument(
+        "--per-company",
+        action="store_true",
+        help="Force legacy per-company agent directory",
+    )
     args = parser.parse_args(argv)
 
     database = Database(_database_url())
@@ -106,15 +120,32 @@ def main(argv: list[str] | None = None) -> None:
             # Detach ORM object for use after session
             session.expunge(company)
 
-        result = run_company_openclaw_agent(
-            company,
-            wait=not args.detach,
-            local=args.local,
-            timeout_seconds=args.timeout,
-            thinking=args.thinking,
-            openclaw_agent=args.agent,
-            scaffold=not args.no_scaffold,
-        )
+        if args.per_company:
+            use_shared = False
+        elif args.shared:
+            use_shared = True
+        else:
+            use_shared = use_shared_collector_by_default()
+
+        if use_shared:
+            result = run_shared_collector_for_company(
+                company,
+                wait=not args.detach,
+                local=args.local,
+                timeout_seconds=args.timeout,
+                thinking=args.thinking,
+                openclaw_agent=args.agent,
+            )
+        else:
+            result = run_company_openclaw_agent(
+                company,
+                wait=not args.detach,
+                local=args.local,
+                timeout_seconds=args.timeout,
+                thinking=args.thinking,
+                openclaw_agent=args.agent,
+                scaffold=not args.no_scaffold,
+            )
     finally:
         database.dispose()
 

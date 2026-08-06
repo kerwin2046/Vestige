@@ -102,6 +102,26 @@ export default function RunDetailPage() {
 	const configuredLanes =
 		(run.settings_snapshot?.lanes as string[] | undefined) ||
 		Object.keys(laneResults);
+	const laneNames =
+		configuredLanes.length > 0
+			? configuredLanes
+			: Object.keys(laneResults).length > 0
+				? Object.keys(laneResults)
+				: ["footprint", "channels", "owned"];
+	const failedLanes = laneNames.filter((lane) => {
+		const status = laneResults[lane]?.status;
+		return status === "error" || status === "empty";
+	});
+	const laneFailureSummary =
+		failedLanes.length > 0
+			? failedLanes
+					.map((lane) => {
+						const info = laneResults[lane];
+						const detail = info?.error?.trim();
+						return detail ? `${lane}: ${detail}` : `${lane} (${info?.status || "failed"})`;
+					})
+					.join(" · ")
+			: null;
 	const runWarning =
 		typeof run.settings_snapshot?.warning === "string"
 			? run.settings_snapshot.warning
@@ -283,35 +303,63 @@ export default function RunDetailPage() {
 							<CardTitle className="text-sm font-semibold flex items-center gap-2">
 								<Layers className="h-4 w-4 text-slate-500" />
 								Discovery Lanes
+								{failedLanes.length > 0 ? (
+									<Badge variant="destructive" className="ml-1 font-normal">
+										{failedLanes.length} issue{failedLanes.length > 1 ? "s" : ""}
+									</Badge>
+								) : null}
 							</CardTitle>
 							<p className="text-xs text-slate-400 mt-0.5">
 								Footprint SERP, channel site: search, and owned-domain seed
 							</p>
 						</div>
 					</CardHeader>
-					<CardContent className="p-4">
+					<CardContent className="p-4 space-y-3">
+						{laneFailureSummary ? (
+							<Alert
+								type="error"
+								showIcon
+								message="Lane failures"
+								description={
+									<span className="text-xs leading-relaxed">{laneFailureSummary}</span>
+								}
+								className="border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30"
+							/>
+						) : null}
 						<div className="grid gap-3 sm:grid-cols-3">
-							{(configuredLanes.length
-								? configuredLanes
-								: ["footprint", "channels", "owned"]
-							).map((lane) => {
+							{laneNames.map((lane) => {
 								const info = laneResults[lane];
-								const status = info?.status || (run.status === "queued" || run.status === "running" ? "pending" : "—");
-								const color =
-									status === "ok"
-										? "success"
-										: status === "error" || status === "empty"
-											? "error"
-											: status === "seeded" || status === "warning"
+								const status =
+									info?.status ||
+									(run.status === "queued" || run.status === "running" ? "pending" : "—");
+								const isError = status === "error";
+								const isEmpty = status === "empty";
+								const isOk = status === "ok" || status === "seeded";
+								const color = isOk
+									? "success"
+									: isError
+										? "error"
+										: isEmpty
+											? "warning"
+											: status === "warning"
 												? "warning"
 												: "default";
+								const cardTone = isError
+									? "border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/40"
+									: isEmpty
+										? "border-amber-300 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/30"
+										: isOk
+											? "border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20"
+											: "border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40";
 								return (
-									<div
-										key={lane}
-										className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-3"
-									>
+									<div key={lane} className={`rounded-lg border p-3 ${cardTone}`}>
 										<div className="flex items-center justify-between gap-2">
-											<span className="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
+											<span className="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+												{isError ? (
+													<XCircle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
+												) : isOk ? (
+													<CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+												) : null}
 												{lane}
 											</span>
 											<Tag color={color}>{status}</Tag>
@@ -320,8 +368,18 @@ export default function RunDetailPage() {
 											{info?.source_count ?? 0} sources
 										</div>
 										{info?.error ? (
-											<p className="mt-2 text-xs text-amber-700 dark:text-amber-400 line-clamp-3">
+											<p
+												className={`mt-2 text-xs whitespace-pre-wrap break-words ${
+													isError
+														? "text-rose-700 dark:text-rose-300"
+														: "text-amber-800 dark:text-amber-300"
+												}`}
+											>
 												{info.error}
+											</p>
+										) : isEmpty ? (
+											<p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+												No sources returned for this lane
 											</p>
 										) : null}
 									</div>
@@ -348,6 +406,14 @@ export default function RunDetailPage() {
 					showIcon
 					message="Lane warning"
 					description={runWarning}
+				/>
+			)}
+			{laneFailureSummary && !run.error && !runWarning && failedLanes.some((l) => laneResults[l]?.status === "error") && (
+				<Alert
+					type="warning"
+					showIcon
+					message="Partial discovery"
+					description="One or more lanes failed; other lanes may still have contributed sources. Check Discovery Lanes above."
 				/>
 			)}
 			{run.status === "queued" && (

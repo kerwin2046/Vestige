@@ -171,10 +171,16 @@ def run_agent(
     wait: bool = Query(default=False),
     local: bool = Query(default=False),
     timeout: int = Query(default=600, ge=30, le=3600),
+    shared: bool | None = Query(
+        default=None,
+        description="Use shared signals-collector (default from VESTIGE_SHARED_COLLECTOR).",
+    ),
     session: Session = Depends(get_session),
 ):
     """Trigger OpenClaw to execute this company's agent workspace.
 
+    Default uses the shared signals-collector (one agent, many companies).
+    Pass shared=false to use the legacy per-company agent directory.
     Default is detached (returns immediately with pid + log_path).
     Pass wait=true to block until the OpenClaw turn finishes.
     """
@@ -182,12 +188,26 @@ def run_agent(
     if company is None:
         raise HTTPException(status_code=404, detail="company not found")
     try:
-        result = run_company_openclaw_agent(
-            company,
-            wait=wait,
-            local=local,
-            timeout_seconds=timeout,
+        from application.signals_collector import (
+            run_shared_collector_for_company,
+            use_shared_collector_by_default,
         )
+
+        use_shared = shared if shared is not None else use_shared_collector_by_default()
+        if use_shared:
+            result = run_shared_collector_for_company(
+                company,
+                wait=wait,
+                local=local,
+                timeout_seconds=timeout,
+            )
+        else:
+            result = run_company_openclaw_agent(
+                company,
+                wait=wait,
+                local=local,
+                timeout_seconds=timeout,
+            )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
