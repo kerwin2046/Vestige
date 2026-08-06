@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +53,9 @@ class Company(Base):
     )
 
     runs: Mapped[list["Run"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    signals: Mapped[list["CompanySignal"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
 
@@ -114,6 +117,50 @@ class RunSource(Base):
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     run: Mapped[Run] = relationship(back_populates="sources")
+
+
+class CompanySignal(Base):
+    """Company-level signal entity (upsert by canonical_url; runs stay append-only audit)."""
+
+    __tablename__ = "company_signals"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "canonical_url", name="uq_company_signals_company_url"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    url: Mapped[str] = mapped_column(Text)
+    canonical_url: Mapped[str] = mapped_column(Text, index=True)
+    domain: Mapped[str] = mapped_column(String(255), index=True, default="")
+    source_type: Mapped[str] = mapped_column(String(64), index=True, default="other")
+    ownership: Mapped[str] = mapped_column(String(32), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    title: Mapped[str] = mapped_column(Text, default="")
+    snippet: Mapped[str] = mapped_column(Text, default="")
+    discovery_path: Mapped[str] = mapped_column(Text, default="")
+    collector: Mapped[str] = mapped_column(String(64), default="", index=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    last_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    company: Mapped[Company] = relationship(back_populates="signals")
 
 
 class RunEvent(Base):

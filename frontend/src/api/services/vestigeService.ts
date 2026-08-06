@@ -3,6 +3,7 @@ import type {
 	ChannelStats,
 	Company,
 	CompanyInput,
+	CompanySignalsPage,
 	CompanyTier,
 	DashboardSummary,
 	DiscoveryRun,
@@ -54,6 +55,9 @@ const retryRun = (id: string) =>
 const listRunSources = (id: string) =>
 	apiClient.get<RunSource[]>({ url: `/runs/${id}/sources` });
 
+const listCompanySignals = (id: string, params?: { limit?: number; offset?: number }) =>
+	apiClient.get<CompanySignalsPage>({ url: `/companies/${id}/signals`, params });
+
 const listChannels = (params?: {
 	kind?: string;
 	q?: string;
@@ -100,6 +104,7 @@ export default {
 	cancelRun,
 	retryRun,
 	listRunSources,
+	listCompanySignals,
 	listChannels,
 	getChannelStats,
 	scaffoldCompanyAgent,

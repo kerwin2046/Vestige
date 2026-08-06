@@ -8,11 +8,13 @@ from application.openclaw_agent import run_company_openclaw_agent
 from application.scaffold_agent import agents_root, company_slug, scaffold_company_agent
 from database import get_session
 from repositories import companies
+from repositories import signals as signals_repo
 from responses import success
 from schemas import (
     CompanyCreate,
     CompanyPromote,
     CompanyRead,
+    CompanySignalRead,
     CompanyUpdate,
     IngestRequest,
 )
@@ -115,6 +117,31 @@ def ingest(
         day=data.day,
     )
     return success(result)
+
+
+@router.get("/{company_id}/signals")
+def list_signals(
+    company_id: str,
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+):
+    """Company-level signal ledger (upserted; not tied to latest run)."""
+    if companies.get_company(session, company_id) is None:
+        raise HTTPException(status_code=404, detail="company not found")
+    rows = signals_repo.list_company_signals(
+        session, company_id, limit=limit, offset=offset
+    )
+    total = signals_repo.count_company_signals(session, company_id)
+    return success(
+        {
+            "items": [
+                CompanySignalRead.model_validate(row).model_dump(mode="json")
+                for row in rows
+            ],
+            "total": total,
+        }
+    )
 
 
 @router.post("/{company_id}/scaffold-agent")

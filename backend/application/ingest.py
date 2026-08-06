@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from models import Run, RunSource, RunStatus, utc_now
 from repositories import runs as runs_repo
+from repositories import signals as signals_repo
 
 
 def _host_of(url: str) -> str:
@@ -33,6 +34,10 @@ def run_kind(run: Run) -> str:
 
 
 def existing_signal_urls(session: Session, company_id: str) -> set[str]:
+    """URLs already in the company signal ledger (preferred) or historic runs."""
+    known = signals_repo.existing_canonical_urls(session, company_id)
+    if known:
+        return known
     runs = runs_repo.list_runs(session, company_id=company_id, status=RunStatus.SUCCEEDED)
     urls: set[str] = set()
     for run in runs:
@@ -114,36 +119,44 @@ def ingest_signals(
     collector: str = "openclaw",
     day: str | None = None,
 ) -> dict[str, Any]:
-    known = existing_signal_urls(session, company_id)
-    fresh: list[dict[str, Any]] = []
+    """Upsert company_signals (entity) and append first-seen rows to daily run (audit)."""
+    day = day or date.today().isoformat()
     seen_batch: set[str] = set()
+    normalized_items: list[dict[str, Any]] = []
     for raw in items:
         item = normalize_ingest_item(raw)
         if item is None:
             continue
         key = item["canonical_url"]
-        if key in known or key in seen_batch:
+        if key in seen_batch:
             continue
         seen_batch.add(key)
-        fresh.append(item)
+        normalized_items.append(item)
 
-    if not fresh:
+    if not normalized_items:
         return {
             "inserted": 0,
+            "updated": 0,
             "skipped": len(items),
             "run_id": None,
-            "day": day or date.today().isoformat(),
+            "day": day,
         }
 
+    # Ensure daily audit run exists when we have anything to process
     run = get_or_create_daily_signal_run(
         session, company_id=company_id, day=day, collector=collector
     )
     assert run is not None
 
-    created: list[RunSource] = []
-    for item in fresh:
-        row = RunSource(
-            run_id=run.id,
+    inserted = 0
+    updated = 0
+    audit_rows: list[RunSource] = []
+    now = utc_now()
+
+    for item in normalized_items:
+        _row, created = signals_repo.upsert_signal(
+            session,
+            company_id=company_id,
             url=item["url"],
             canonical_url=item["canonical_url"],
             domain=item["domain"],
@@ -153,21 +166,50 @@ def ingest_signals(
             title=item["title"],
             snippet=item["snippet"],
             discovery_path=item["discovery_path"],
-            bfs_round=item["bfs_round"],
+            collector=collector,
             detail=item["detail"],
+            seen_at=now,
+            run_id=run.id,
         )
+        if created:
+            inserted += 1
+            audit_rows.append(
+                RunSource(
+                    run_id=run.id,
+                    url=item["url"],
+                    canonical_url=item["canonical_url"],
+                    domain=item["domain"],
+                    source_type=item["source_type"],
+                    ownership=item["ownership"],
+                    confidence=item["confidence"],
+                    title=item["title"],
+                    snippet=item["snippet"],
+                    discovery_path=item["discovery_path"],
+                    bfs_round=item["bfs_round"],
+                    detail=item["detail"],
+                )
+            )
+        else:
+            updated += 1
+
+    for row in audit_rows:
         session.add(row)
-        created.append(row)
     session.commit()
 
     runs_repo.append_run_event(
         session,
         run_id=run.id,
         stage="ingest",
-        message=f"Ingested {len(created)} new signals via {collector}",
-        payload={"inserted": len(created), "skipped": len(items) - len(created)},
+        message=(
+            f"Ingested via {collector}: {inserted} new, {updated} updated "
+            f"({len(normalized_items)} in batch)"
+        ),
+        payload={
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": len(items) - len(normalized_items),
+        },
     )
-    # Keep succeeded metadata fresh
     run.finished_at = utc_now()
     run.status = RunStatus.SUCCEEDED
     run.stage = "succeeded"
@@ -175,8 +217,9 @@ def ingest_signals(
     session.commit()
 
     return {
-        "inserted": len(created),
-        "skipped": len(items) - len(created),
+        "inserted": inserted,
+        "updated": updated,
+        "skipped": len(items) - len(normalized_items),
         "run_id": run.id,
-        "day": (run.settings_snapshot or {}).get("day") or day or date.today().isoformat(),
+        "day": (run.settings_snapshot or {}).get("day") or day,
     }

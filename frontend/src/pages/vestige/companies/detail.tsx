@@ -1,6 +1,6 @@
 import vestigeService from "@/api/services/vestigeService";
 import { Chart, useChart } from "@/components/chart";
-import type { DiscoveryRun, RunSource } from "@/types/vestige";
+import type { CompanySignal, DiscoveryRun, RunSource } from "@/types/vestige";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
@@ -250,9 +250,6 @@ export default function CompanyDetailPage() {
 	const latestFootprint = runs.find(
 		(run) => run.status === "succeeded" && runKind(run) !== "signals",
 	);
-	const latestSignals = runs.find(
-		(run) => run.status === "succeeded" && runKind(run) === "signals",
-	);
 
 	const sourcesQuery = useQuery({
 		queryKey: ["run-sources", latestFootprint?.id],
@@ -261,13 +258,14 @@ export default function CompanyDetailPage() {
 	});
 
 	const signalsQuery = useQuery({
-		queryKey: ["run-sources-signals", latestSignals?.id],
-		queryFn: () => vestigeService.listRunSources(latestSignals?.id ?? ""),
-		enabled: Boolean(latestSignals?.id),
+		queryKey: ["company-signals", id],
+		queryFn: () => vestigeService.listCompanySignals(id),
+		enabled: Boolean(id),
 	});
 
 	const sources = sourcesQuery.data ?? [];
-	const signalSources = signalsQuery.data ?? [];
+	const signalSources = signalsQuery.data?.items ?? [];
+	const signalTotal = signalsQuery.data?.total ?? signalSources.length;
 
 	const runMutation = useMutation({
 		mutationFn: () =>
@@ -308,6 +306,7 @@ export default function CompanyDetailPage() {
 			);
 			await queryClient.invalidateQueries({ queryKey: ["company", id] });
 			await queryClient.invalidateQueries({ queryKey: ["runs", id] });
+			await queryClient.invalidateQueries({ queryKey: ["company-signals", id] });
 		},
 		onError: (error: Error) => message.error(error.message || "Failed to run OpenClaw agent"),
 	});
@@ -455,6 +454,72 @@ export default function CompanyDetailPage() {
 		},
 	];
 
+	const signalColumns: ColumnsType<CompanySignal> = [
+		{
+			title: "Signal / URL",
+			dataIndex: "url",
+			key: "url",
+			render: (url: string, record) => (
+				<div className="flex flex-col max-w-lg">
+					<a
+						href={url}
+						target="_blank"
+						rel="noreferrer"
+						className="font-medium text-slate-900 hover:text-blue-600 dark:text-slate-100 dark:hover:text-blue-400 truncate flex items-center gap-1.5"
+					>
+						<Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+						<span className="truncate">{record.title || url}</span>
+						<ExternalLink className="h-3 w-3 shrink-0 text-slate-400 opacity-60" />
+					</a>
+					<span className="text-xs text-slate-400 font-mono truncate">{url}</span>
+				</div>
+			),
+		},
+		{
+			title: "Domain",
+			dataIndex: "domain",
+			key: "domain",
+			width: 140,
+			render: (domain: string) => (
+				<span className="text-xs font-mono font-medium text-slate-600 dark:text-slate-300">
+					{domain || "—"}
+				</span>
+			),
+		},
+		{
+			title: "Category",
+			dataIndex: "source_type",
+			key: "source_type",
+			width: 150,
+			render: (value: string) => <Tag color="blue">{labelSourceType(value)}</Tag>,
+		},
+		{
+			title: "Collector",
+			dataIndex: "collector",
+			key: "collector",
+			width: 120,
+			render: (value: string) => (
+				<span className="text-xs text-slate-500">{value || "—"}</span>
+			),
+		},
+		{
+			title: "Confidence",
+			dataIndex: "confidence",
+			key: "confidence",
+			width: 110,
+			render: (val: number) => <ConfidenceBadge value={val ?? 0} />,
+		},
+		{
+			title: "Last Seen",
+			dataIndex: "last_seen_at",
+			key: "last_seen_at",
+			width: 160,
+			render: (value: string) => (
+				<span className="text-xs text-slate-500">{formatDateTime(value)}</span>
+			),
+		},
+	];
+
 	const runColumns: ColumnsType<DiscoveryRun> = [
 		{
 			title: "Run ID",
@@ -541,7 +606,17 @@ export default function CompanyDetailPage() {
 					value={String(sources.length)}
 					icon={Layers}
 					accentColor="blue"
-					footnote={latestFootprint ? `Footprint ${latestFootprint.id.slice(0, 8)}` : "No run yet"}
+					footnote={
+						latestFootprint
+							? (() => {
+									const merge = (latestFootprint.settings_snapshot as { merge?: { total?: number; added?: number; kept?: number } })
+										?.merge;
+									const short = `Footprint ${latestFootprint.id.slice(0, 8)}`;
+									if (!merge) return short;
+									return `${short} · inventory ${merge.total ?? sources.length} (+${merge.added ?? 0} / kept ${merge.kept ?? 0})`;
+								})()
+							: "No run yet"
+					}
 				/>
 				<StatCard
 					label="Unique Domains"
@@ -569,10 +644,10 @@ export default function CompanyDetailPage() {
 				/>
 				<StatCard
 					label="Daily Signals"
-					value={String(signalSources.length)}
+					value={String(signalTotal)}
 					icon={Bell}
 					accentColor="rose"
-					footnote={latestSignals ? `Signals ${latestSignals.id.slice(0, 8)}` : "No signals yet"}
+					footnote={signalTotal ? "Company signal ledger" : "No signals yet"}
 				/>
 			</div>
 
@@ -742,13 +817,13 @@ export default function CompanyDetailPage() {
 		<Card className="border-slate-200 dark:border-slate-800 shadow-xs">
 			<CardHeader className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-row items-center justify-between">
 				<div>
-					<CardTitle className="text-base font-semibold">OpenClaw Daily Ingested Signals</CardTitle>
+					<CardTitle className="text-base font-semibold">Company Signal Ledger</CardTitle>
 					<p className="text-xs text-slate-500 mt-0.5">
-						Continuous automated signals ingested via company agent POST calls
+						Upserted by canonical URL across all ingest batches (OpenClaw + competitive-intel)
 					</p>
 				</div>
 				<Badge variant="secondary" className="font-mono">
-					{signalSources.length} Signals
+					{signalTotal} Signals
 				</Badge>
 			</CardHeader>
 			<CardContent className="p-0">
@@ -756,7 +831,7 @@ export default function CompanyDetailPage() {
 					rowKey="id"
 					size="middle"
 					loading={signalsQuery.isLoading}
-					columns={sourceColumns}
+					columns={signalColumns}
 					dataSource={signalSources}
 					pagination={{ pageSize: 15, showSizeChanger: true }}
 					locale={{
@@ -767,7 +842,7 @@ export default function CompanyDetailPage() {
 							/>
 						),
 					}}
-					scroll={{ x: 900 }}
+					scroll={{ x: 1000 }}
 				/>
 			</CardContent>
 		</Card>
@@ -987,7 +1062,7 @@ export default function CompanyDetailPage() {
 						items={[
 							{ key: "overview", label: "Overview", children: overviewTab },
 							{ key: "sources", label: `Footprint Sources (${sources.length})`, children: sourcesTab },
-							{ key: "signals", label: `Daily Signals (${signalSources.length})`, children: signalsTab },
+							{ key: "signals", label: `Daily Signals (${signalTotal})`, children: signalsTab },
 							{ key: "history", label: `Run History (${runs.length})`, children: historyTab },
 							{ key: "settings", label: "Settings & Agent", children: settingsTab },
 						]}

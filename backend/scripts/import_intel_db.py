@@ -23,6 +23,7 @@ from sqlalchemy import select
 from database import Database
 from models import Company, Run, RunStatus, utc_now
 from repositories import runs as runs_repo
+from repositories import signals as signals_repo
 
 DEFAULT_INTEL_DB = Path.home() / ".openclaw/workspace/competitive-intel/intel.db"
 
@@ -281,6 +282,29 @@ def import_intel(intel_db: Path, *, dry_run: bool = False) -> int:
             session.commit()
             session.refresh(run)
             runs_repo.replace_run_sources(session, run.id, sources)
+            for item in sources:
+                url = str(item.get("url") or "").strip()
+                if not url.startswith("http"):
+                    continue
+                canonical = str(item.get("canonical_url") or url).strip() or url
+                signals_repo.upsert_signal(
+                    session,
+                    company_id=company.id,
+                    url=url,
+                    canonical_url=canonical,
+                    domain=str(item.get("domain") or ""),
+                    source_type=str(item.get("source_type") or "other"),
+                    ownership=str(item.get("ownership") or "unknown"),
+                    confidence=float(item.get("confidence") or 0),
+                    title=str(item.get("title") or ""),
+                    snippet=str(item.get("snippet") or ""),
+                    discovery_path=str(item.get("discovery_path") or "competitive-intel"),
+                    collector="competitive-intel",
+                    detail=item.get("detail") if isinstance(item.get("detail"), dict) else None,
+                    seen_at=run.finished_at or run.created_at,
+                    run_id=run.id,
+                )
+            session.commit()
             runs_repo.append_run_event(
                 session,
                 run_id=run.id,

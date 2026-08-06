@@ -6,6 +6,11 @@ import os
 import traceback
 from pathlib import Path
 
+from application.merge_sources import (
+    latest_successful_footprint_run,
+    merge_footprint_sources,
+    source_to_dict,
+)
 from application.orchestrate import DiscoveryEmptyError, orchestrate_run
 from database import Database
 from models import RunStatus
@@ -129,6 +134,24 @@ async def process_run(database: Database, run_id: str) -> None:
         sources = outcome.get("sources") or []
         lanes = outcome.get("lanes") or {}
         warning = outcome.get("warning")
+        merge_stats = {
+            "added": len(sources),
+            "updated": 0,
+            "kept": 0,
+            "total": len(sources),
+            "base": 0,
+            "incoming": len(sources),
+        }
+
+        previous = latest_successful_footprint_run(
+            session, run.company_id, exclude_run_id=run.id
+        )
+        if previous is not None:
+            base = [
+                source_to_dict(row)
+                for row in runs_repo.list_run_sources(session, previous.id)
+            ]
+            sources, merge_stats = merge_footprint_sources(base, sources)
 
         for lane_name, lane_info in lanes.items():
             level = "warning" if lane_info.get("status") in {"empty", "error", "seeded"} else "info"
@@ -147,6 +170,9 @@ async def process_run(database: Database, run_id: str) -> None:
 
         snap = dict(run.settings_snapshot or {})
         snap["lane_results"] = lanes
+        snap["merge"] = merge_stats
+        if previous is not None:
+            snap["merged_from_run_id"] = previous.id
         if warning:
             snap["warning"] = warning
         run.settings_snapshot = snap
@@ -158,8 +184,18 @@ async def process_run(database: Database, run_id: str) -> None:
             session,
             run_id=run.id,
             stage="persisting",
-            message=f"Persisted {len(sources)} sources across {len(lanes)} lanes",
-            payload={"source_count": len(sources), "lanes": lanes, "warning": warning},
+            message=(
+                f"Persisted {merge_stats['total']} sources "
+                f"(+{merge_stats['added']} new, ~{merge_stats['updated']} updated, "
+                f"{merge_stats['kept']} kept from prior)"
+            ),
+            payload={
+                "source_count": merge_stats["total"],
+                "merge": merge_stats,
+                "lanes": lanes,
+                "warning": warning,
+                "merged_from_run_id": previous.id if previous else None,
+            },
         )
         runs_repo.mark_run_succeeded(
             session,
@@ -180,6 +216,14 @@ async def worker_loop(*, poll_interval: float = 2.0, once: bool = False) -> None
     database = Database(_database_url())
     database.create_all()
     print(f"Vestige worker started · db={_database_url()}")
+
+    with database.session_factory() as session:
+        recovered = runs_repo.recover_orphaned_runs(session)
+    if recovered["requeued"] or recovered["cancelled"]:
+        print(
+            "Recovered orphaned runs · "
+            f"requeued={recovered['requeued']} cancelled={recovered['cancelled']}"
+        )
 
     try:
         while True:

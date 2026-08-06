@@ -146,6 +146,27 @@ class RunSourceRead(BaseModel):
     detail: dict[str, Any] | None = None
 
 
+class CompanySignalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    company_id: str
+    url: str
+    canonical_url: str
+    domain: str
+    source_type: str
+    ownership: str
+    confidence: float
+    title: str
+    snippet: str
+    discovery_path: str
+    collector: str = ""
+    detail: dict[str, Any] | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    last_run_id: str | None = None
+
+
 class ChannelRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

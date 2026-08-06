@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from application.merge_sources import latest_successful_footprint_run
 from database import get_session
 from models import Run, RunStatus
 from repositories import companies, runs
@@ -45,7 +46,7 @@ def create(
 ):
     if companies.get_company(session, company_id) is None:
         raise HTTPException(status_code=404, detail="company not found")
-    previous = runs.latest_successful_run(session, company_id)
+    previous = latest_successful_footprint_run(session, company_id)
     run = runs.create_run(
         session,
         company_id=company_id,

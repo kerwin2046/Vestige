@@ -1,8 +1,12 @@
-.PHONY: help up down run api web worker import-output import-intel import-b2b import-competitors sync-companies sync-expomind scaffold-agents run-agent status logs \
+.PHONY: help up down run api web worker import-output import-intel import-b2b import-competitors sync-companies sync-expomind scaffold-agents run-agent backfill-signals status logs \
 	docker-up docker-up-crawler docker-camofox docker-down docker-check docker-logs
 
 # 全部 Python 代码在 backend/；以前端 frontend/ 对称。
 export PYTHONPATH := $(CURDIR)/backend
+
+# 优先用项目 venv 的解释器；没有 venv 时回退到系统 python3。
+# 避免 worker/CLI 误用系统 python 导致 crawl4ai/exa_py 等依赖缺失而“静默半死”。
+PY := $(if $(wildcard $(CURDIR)/venv/bin/python),$(CURDIR)/venv/bin/python,python3)
 
 # 一键启动 Docker + 健康检查
 up: docker-up-crawler status
@@ -11,11 +15,11 @@ down: docker-down
 
 # 跑 Vestige pipeline（需在项目根目录、venv 已激活）
 run:
-	python3 backend/main.py
+	$(PY) backend/main.py
 
 # 启动 Web Admin 后端 API（FastAPI，端口 8001；避开本机常见 :8000 占用）
 api:
-	python3 -m uvicorn app:app --host 127.0.0.1 --port 8001 --reload --app-dir backend
+	$(PY) -m uvicorn app:app --host 127.0.0.1 --port 8001 --reload --app-dir backend
 
 # 启动 Web Admin 前端（Vite，端口 9091，代理到 :8001）
 web:
@@ -23,35 +27,39 @@ web:
 
 # 启动发现任务 worker（轮询 queued runs）
 worker:
-	python3 -m worker
+	$(PY) -m worker
 
 # 把 output/*.xlsx 与 output/*.json 历史结果导入 SQLite（幂等，可重复跑）
 import-output:
-	python3 -m scripts.import_output
+	$(PY) -m scripts.import_output
 
 # Vestige ↔ MfgRadar 公司主数据双向同步（按域名对齐）
 sync-companies:
-	python3 -m scripts.sync_company_master
+	$(PY) -m scripts.sync_company_master
 
 # ExpoMind 精选同步：竞品→Targets，Yes/High 潜客→Candidates
 sync-expomind:
-	python3 -m scripts.sync_expomind
+	$(PY) -m scripts.sync_expomind
 
 # 导入 competitive-intel/intel.db 信号到 Vestige（按竞品落成 run + sources）
 import-intel:
-	python3 -m scripts.import_intel_db
+	$(PY) -m scripts.import_intel_db
 
 # 导入 B2B Platform Radar 平台/协会到 Vestige channels
 import-b2b:
-	python3 -m scripts.import_b2b_db
+	$(PY) -m scripts.import_b2b_db
 
 # 导入同行 Excel（竞品 Targets）：同行列表 + 中国同行背调
 import-competitors:
-	python3 -m scripts.import_competitor_xlsx
+	$(PY) -m scripts.import_competitor_xlsx
 
 # 为已有公司批量生成 OpenClaw agent 目录
 scaffold-agents:
-	python3 -m scripts.scaffold_agents
+	$(PY) -m scripts.scaffold_agents
+
+# 从历史 signal / competitive-intel runs 回填 company_signals 实体表
+backfill-signals:
+	$(PY) -m scripts.backfill_company_signals
 
 # 通过 OpenClaw CLI 跑某公司 agent（需 gateway；无 gateway 时 LOCAL=1）
 # 用法: make run-agent DOMAIN=xometry.com
@@ -62,7 +70,7 @@ run-agent:
 		echo "Usage: make run-agent DOMAIN=xometry.com | ID=<uuid> | SLUG=xometry | NAME=Xometry"; \
 		exit 1; \
 	fi
-	python3 -m scripts.run_openclaw_agent \
+	$(PY) -m scripts.run_openclaw_agent \
 		$(if $(ID),--id "$(ID)") \
 		$(if $(DOMAIN),--domain "$(DOMAIN)") \
 		$(if $(SLUG),--slug "$(SLUG)") \
@@ -90,6 +98,7 @@ help:
 	@echo "  make sync-companies    同步 Vestige ↔ MfgRadar 公司主数据"
 	@echo "  make sync-expomind     同步 ExpoMind 竞品/高优潜客（分层）"
 	@echo "  make scaffold-agents   为已有公司生成 OpenClaw agent 目录"
+	@echo "  make backfill-signals  回填 company_signals（历史 signal runs）"
 	@echo "  make run-agent DOMAIN=…  调用 OpenClaw 跑该公司 agent"
 	@echo "  make down            停止 Docker 栈"
 	@echo "  make status        检查 SearXNG / Camofox / Cloak"

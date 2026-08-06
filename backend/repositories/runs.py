@@ -78,6 +78,50 @@ def list_run_sources(session: Session, run_id: str) -> list[RunSource]:
     return list(session.scalars(statement))
 
 
+def recover_orphaned_runs(session: Session) -> dict[str, int]:
+    """Recover runs left mid-flight by a crashed/killed worker.
+
+    Single local-worker model: at startup no run can legitimately be RUNNING,
+    so any such row is orphaned and requeued for retry. CANCEL_REQUESTED rows
+    are finalized as CANCELLED. Returns counts per action for logging.
+    """
+    requeued = 0
+    cancelled = 0
+
+    running = list(
+        session.scalars(select(Run).where(Run.status == RunStatus.RUNNING))
+    )
+    for run in running:
+        run.status = RunStatus.QUEUED
+        run.stage = "queued"
+        run.progress = 0
+        run.started_at = None
+        run.error = None
+        requeued += 1
+        session.add(
+            RunEvent(
+                run_id=run.id,
+                level="warning",
+                stage="recovered",
+                message="Worker restarted; requeued run orphaned in 'running'.",
+                payload={},
+            )
+        )
+
+    orphan_cancel = list(
+        session.scalars(select(Run).where(Run.status == RunStatus.CANCEL_REQUESTED))
+    )
+    for run in orphan_cancel:
+        run.status = RunStatus.CANCELLED
+        run.stage = "cancelled"
+        run.finished_at = utc_now()
+        cancelled += 1
+
+    if requeued or cancelled:
+        session.commit()
+    return {"requeued": requeued, "cancelled": cancelled}
+
+
 def claim_next_queued_run(session: Session) -> Run | None:
     """Claim the oldest queued run. Suitable for a single local worker process."""
     run = session.scalar(

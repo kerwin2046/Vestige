@@ -95,6 +95,30 @@ export type RunSource = {
 	detail: Record<string, unknown> | null;
 };
 
+export type CompanySignal = {
+	id: string;
+	company_id: string;
+	url: string;
+	canonical_url: string;
+	domain: string;
+	source_type: string;
+	ownership: string;
+	confidence: number;
+	title: string;
+	snippet: string;
+	discovery_path: string;
+	collector: string;
+	detail: Record<string, unknown> | null;
+	first_seen_at: string;
+	last_seen_at: string;
+	last_run_id: string | null;
+};
+
+export type CompanySignalsPage = {
+	items: CompanySignal[];
+	total: number;
+};
+
 export type ChannelKind = "platform" | "association";
 
 export type Channel = {
