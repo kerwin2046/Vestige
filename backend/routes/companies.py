@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from application.company_activity import activity_dict, activity_revision
 from application.ingest import ingest_signals
 from application.openclaw_agent import run_company_openclaw_agent
 from application.scaffold_agent import agents_root, company_slug, scaffold_company_agent
@@ -22,12 +23,20 @@ from schemas import (
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
 
-def _read(company) -> dict:
+def _read(company, *, include_activity: bool = False) -> dict:
     data = CompanyRead.model_validate(company).model_dump(mode="json")
     agent_dir = agents_root() / company_slug(company)
     data["agent_path"] = str(agent_dir) if agent_dir.exists() else None
     data["agent_slug"] = company_slug(company)
+    if include_activity:
+        data["activity"] = activity_dict(company)
     return data
+
+
+@router.get("/activity-revision")
+def get_activity_revision(session: Session = Depends(get_session)):
+    """Cheap fingerprint — clients refetch directory only when this changes."""
+    return success(activity_revision(session))
 
 
 @router.get("")
@@ -36,12 +45,15 @@ def list_all(
     role: str | None = Query(default=None),
     q: str | None = Query(default=None),
     source: str | None = Query(default=None),
+    include_activity: bool = Query(default=True),
     session: Session = Depends(get_session),
 ):
     items = companies.list_companies(
         session, tier=tier, role=role, q=q, source=source
     )
-    return success([_read(company) for company in items])
+    return success(
+        [_read(company, include_activity=include_activity) for company in items]
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -62,7 +74,7 @@ def get(company_id: str, session: Session = Depends(get_session)):
     company = companies.get_company(session, company_id)
     if company is None:
         raise HTTPException(status_code=404, detail="company not found")
-    return success(_read(company))
+    return success(_read(company, include_activity=True))
 
 
 @router.put("/{company_id}")

@@ -210,6 +210,12 @@ async def process_run(database: Database, run_id: str) -> None:
             message=warning or "Run completed successfully",
             payload={"lanes": lanes},
         )
+        try:
+            from application.company_activity import refresh_company_activity
+
+            refresh_company_activity(session, run.company_id)
+        except Exception as exc:  # noqa: BLE001 — activity is best-effort
+            print(f"activity refresh failed for {run.company_id[:8]}: {exc}")
 
 
 async def worker_loop(*, poll_interval: float = 2.0, once: bool = False) -> None:

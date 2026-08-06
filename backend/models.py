@@ -45,6 +45,19 @@ class Company(Base):
     priority: Mapped[str] = mapped_column(String(32), default="")
     source: Mapped[str] = mapped_column(String(64), default="manual", index=True)
     provenance: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Materialized pulse stats (updated on ingest / backfill; list reads these)
+    signal_count: Mapped[int] = mapped_column(Integer, default=0)
+    signals_today: Mapped[int] = mapped_column(Integer, default=0)
+    last_signal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_run_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    activity_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

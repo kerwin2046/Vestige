@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     with database.session_factory() as session:
         if args.company_id:
             stats = backfill_company_from_runs(session, args.company_id)
+            from application.company_activity import refresh_company_activity
+
+            refresh_company_activity(session, args.company_id)
             print(f"company={args.company_id} {stats}")
         else:
             stats = backfill_all_companies(session)

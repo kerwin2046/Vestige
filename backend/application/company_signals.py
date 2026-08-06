@@ -58,6 +58,7 @@ def backfill_company_from_runs(
 
 
 def backfill_all_companies(session: Session) -> dict[str, int]:
+    from application.company_activity import refresh_all_company_activity
     from repositories import companies as companies_repo
 
     totals = {"companies": 0, "inserted": 0, "updated": 0, "skipped": 0}
@@ -68,4 +69,6 @@ def backfill_all_companies(session: Session) -> dict[str, int]:
         totals["inserted"] += stats["inserted"]
         totals["updated"] += stats["updated"]
         totals["skipped"] += stats["skipped"]
+    activity = refresh_all_company_activity(session)
+    totals["activity_refreshed"] = activity["companies"]
     return totals

@@ -48,6 +48,41 @@ def test_company_crud_round_trip(tmp_path):
         assert client.get("/api/companies").json()["data"] == []
 
 
+def test_company_list_includes_activity(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENCLAW_AGENTS_DIR", str(tmp_path / "agents"))
+    with _client(tmp_path) as client:
+        company = client.post(
+            "/api/companies",
+            json={"name": "Acme", "official_domain": "acme.test", "aliases": []},
+        ).json()["data"]
+        ingest = client.post(
+            f"/api/companies/{company['id']}/ingest",
+            json={
+                "collector": "test",
+                "items": [
+                    {"url": "https://news.test/a", "title": "A", "confidence": 0.9},
+                ],
+            },
+        )
+        assert ingest.status_code == 200
+
+        listed = client.get("/api/companies")
+        assert listed.status_code == 200
+        row = listed.json()["data"][0]
+        assert row["activity"]["signal_count"] == 1
+        assert row["activity"]["signals_today"] == 1
+        assert row["activity"]["active_24h"] is True
+        assert row["activity"]["last_signal_at"]
+
+        rev = client.get("/api/companies/activity-revision")
+        assert rev.status_code == 200
+        assert rev.json()["data"]["revision"]
+        assert rev.json()["data"]["signal_count"] >= 1
+
+        bare = client.get("/api/companies", params={"include_activity": False})
+        assert "activity" not in bare.json()["data"][0]
+
+
 def test_company_name_is_required(tmp_path):
     with _client(tmp_path) as client:
         response = client.post("/api/companies", json={"name": "   "})

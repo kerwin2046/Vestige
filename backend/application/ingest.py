@@ -216,6 +216,10 @@ def ingest_signals(
     run.progress = 100
     session.commit()
 
+    from application.company_activity import refresh_company_activity
+
+    refresh_company_activity(session, company_id)
+
     return {
         "inserted": inserted,
         "updated": updated,

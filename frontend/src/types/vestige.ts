@@ -13,6 +13,15 @@ export type CompanyInput = {
 
 export type CompanyTier = "candidate" | "target" | "monitoring";
 
+export type CompanyActivity = {
+	signal_count: number;
+	signals_today: number;
+	last_signal_at: string | null;
+	last_run_status: string | null;
+	last_run_at: string | null;
+	active_24h: boolean;
+};
+
 export type Company = Required<Omit<CompanyInput, "tier" | "roles" | "priority" | "source" | "provenance">> & {
 	id: string;
 	created_at: string;
@@ -23,6 +32,7 @@ export type Company = Required<Omit<CompanyInput, "tier" | "roles" | "priority" 
 	priority: string;
 	source: string;
 	provenance?: Record<string, unknown> | null;
+	activity?: CompanyActivity | null;
 };
 
 export type RunStatus =

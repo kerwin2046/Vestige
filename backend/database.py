@@ -47,6 +47,12 @@ def _ensure_sqlite_company_columns(engine: Engine) -> None:
         "priority": "VARCHAR(32) DEFAULT ''",
         "source": "VARCHAR(64) DEFAULT 'manual'",
         "provenance": "JSON",
+        "signal_count": "INTEGER DEFAULT 0",
+        "signals_today": "INTEGER DEFAULT 0",
+        "last_signal_at": "DATETIME",
+        "last_run_status": "VARCHAR(32)",
+        "last_run_at": "DATETIME",
+        "activity_updated_at": "DATETIME",
     }
     with engine.begin() as conn:
         rows = conn.exec_driver_sql("PRAGMA table_info(companies)").fetchall()

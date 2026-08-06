@@ -139,6 +139,79 @@ def daily_signal_totals(
     return [(day, high + medium + low) for day, high, medium, low in rows]
 
 
+def company_activity_stats(
+    session: Session, company_ids: list[str] | None = None
+) -> dict[str, dict]:
+    """Batch signal/run activity for directory cards. Keys are company_id."""
+    from collections import defaultdict
+    from datetime import datetime, timezone
+
+    from models import Run, RunStatus
+    from sqlalchemy import func
+
+    today = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).replace(tzinfo=None)
+
+    signal_stmt = select(
+        CompanySignal.company_id,
+        func.count().label("signal_count"),
+        func.max(CompanySignal.last_seen_at).label("last_signal_at"),
+    ).group_by(CompanySignal.company_id)
+    today_stmt = select(
+        CompanySignal.company_id,
+        func.count().label("signals_today"),
+    ).where(CompanySignal.last_seen_at >= today).group_by(CompanySignal.company_id)
+
+    if company_ids is not None:
+        if not company_ids:
+            return {}
+        signal_stmt = signal_stmt.where(CompanySignal.company_id.in_(company_ids))
+        today_stmt = today_stmt.where(CompanySignal.company_id.in_(company_ids))
+
+    stats: dict[str, dict] = defaultdict(
+        lambda: {
+            "signal_count": 0,
+            "signals_today": 0,
+            "last_signal_at": None,
+            "last_run_status": None,
+            "last_run_at": None,
+            "active_24h": False,
+        }
+    )
+
+    for company_id, count, last_seen in session.execute(signal_stmt):
+        row = stats[str(company_id)]
+        row["signal_count"] = int(count or 0)
+        if last_seen is not None:
+            row["last_signal_at"] = last_seen
+            seen = _as_utc(last_seen)
+            if seen is not None:
+                age_h = (datetime.now(timezone.utc) - seen).total_seconds() / 3600
+                row["active_24h"] = age_h <= 24
+
+    for company_id, count in session.execute(today_stmt):
+        stats[str(company_id)]["signals_today"] = int(count or 0)
+
+    run_stmt = (
+        select(Run.company_id, Run.status, Run.created_at, Run.finished_at)
+        .order_by(Run.created_at.desc())
+    )
+    if company_ids is not None:
+        run_stmt = run_stmt.where(Run.company_id.in_(company_ids))
+    seen_companies: set[str] = set()
+    for company_id, status, created_at, finished_at in session.execute(run_stmt):
+        key = str(company_id)
+        if key in seen_companies:
+            continue
+        seen_companies.add(key)
+        status_value = status.value if isinstance(status, RunStatus) else str(status)
+        stats[key]["last_run_status"] = status_value
+        stats[key]["last_run_at"] = finished_at or created_at
+
+    return dict(stats)
+
+
 def get_by_canonical_url(
     session: Session, company_id: str, canonical_url: str
 ) -> CompanySignal | None:

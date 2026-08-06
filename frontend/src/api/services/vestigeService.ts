@@ -19,11 +19,19 @@ const getDashboard = (params?: { limit?: number; offset?: number }) =>
 const getDashboardFeed = (params?: { limit?: number; offset?: number }) =>
 	apiClient.get<PulseFeed>({ url: "/dashboard/feed", params });
 
+const getCompanyActivityRevision = () =>
+	apiClient.get<{
+		revision: string;
+		signal_count: number;
+		max_last_signal_at: string | null;
+	}>({ url: "/companies/activity-revision" });
+
 const listCompanies = (params?: {
 	tier?: string;
 	role?: string;
 	q?: string;
 	source?: string;
+	include_activity?: boolean;
 }) => apiClient.get<Company[]>({ url: "/companies", params });
 
 const getCompany = (id: string) => apiClient.get<Company>({ url: `/companies/${id}` });
@@ -98,6 +106,7 @@ const runCompanyAgent = (
 export default {
 	getDashboard,
 	getDashboardFeed,
+	getCompanyActivityRevision,
 	listCompanies,
 	getCompany,
 	createCompany,
