@@ -71,11 +71,51 @@ export type DiscoveryRun = {
 	company: Company;
 };
 
+export type DashboardSignal = CompanySignal & {
+	company: Company | null;
+	score?: number;
+	priority?: "High" | "Medium" | "Low" | string;
+};
+
+export type SignalSeriesPoint = {
+	day: string;
+	high: number;
+	medium: number;
+	low: number;
+	total: number;
+};
+
+export type SignalTypeShare = {
+	key: string;
+	count: number;
+	share: number;
+};
+
+export type PulseFeed = {
+	window: string;
+	window_label: string;
+	must_see: DashboardSignal[];
+	feed: DashboardSignal[];
+	feed_total: number;
+	offset: number;
+	limit: number;
+	has_more: boolean;
+	next_offset: number;
+	candidate_count: number;
+};
+
 export type DashboardSummary = {
 	company_count: number;
 	run_count: number;
 	queued_count: number;
 	source_count: number;
+	signal_count: number;
+	signals_today: number;
+	signal_series: SignalSeriesPoint[];
+	top_signal_types: SignalTypeShare[];
+	pulse: PulseFeed;
+	recent_signals: DashboardSignal[];
+	recent_insights: DashboardSignal[];
 	recent_runs: DiscoveryRun[];
 };
 

@@ -52,6 +52,93 @@ def count_company_signals(session: Session, company_id: str) -> int:
     )
 
 
+def list_recent_signals(
+    session: Session,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[CompanySignal]:
+    stmt = (
+        select(CompanySignal)
+        .order_by(CompanySignal.last_seen_at.desc(), CompanySignal.id.desc())
+        .offset(max(0, offset))
+        .limit(max(1, limit))
+    )
+    return list(session.scalars(stmt))
+
+
+def count_signals_since(session: Session, since: datetime) -> int:
+    from sqlalchemy import func
+
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(CompanySignal)
+            .where(CompanySignal.last_seen_at >= since)
+        )
+        or 0
+    )
+
+
+def count_all_signals(session: Session) -> int:
+    from sqlalchemy import func
+
+    return int(session.scalar(select(func.count()).select_from(CompanySignal)) or 0)
+
+
+def signal_type_breakdown(
+    session: Session, *, limit: int = 8
+) -> list[tuple[str, int]]:
+    from sqlalchemy import func
+
+    rows = session.execute(
+        select(CompanySignal.source_type, func.count())
+        .group_by(CompanySignal.source_type)
+        .order_by(func.count().desc())
+        .limit(max(1, limit))
+    ).all()
+    return [(str(name or "other"), int(count)) for name, count in rows]
+
+
+def signals_by_day_since(
+    session: Session, since: datetime
+) -> list[tuple[str, int, int, int]]:
+    """Return (day_iso, high, medium, low) buckets by confidence."""
+    from collections import defaultdict
+
+    rows = session.execute(
+        select(CompanySignal.last_seen_at, CompanySignal.confidence).where(
+            CompanySignal.last_seen_at >= since
+        )
+    ).all()
+    buckets: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
+    for seen_at, confidence in rows:
+        if seen_at is None:
+            continue
+        day = _as_utc(seen_at)
+        if day is None:
+            continue
+        key = day.date().isoformat()
+        conf = float(confidence or 0)
+        if conf >= 0.8:
+            buckets[key][0] += 1
+        elif conf >= 0.5:
+            buckets[key][1] += 1
+        else:
+            buckets[key][2] += 1
+    return [
+        (day, vals[0], vals[1], vals[2])
+        for day, vals in sorted(buckets.items())
+    ]
+
+
+def daily_signal_totals(
+    session: Session, since: datetime
+) -> list[tuple[str, int]]:
+    rows = signals_by_day_since(session, since)
+    return [(day, high + medium + low) for day, high, medium, low in rows]
+
+
 def get_by_canonical_url(
     session: Session, company_id: str, canonical_url: str
 ) -> CompanySignal | None:

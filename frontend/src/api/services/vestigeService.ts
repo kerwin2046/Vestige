@@ -7,12 +7,17 @@ import type {
 	CompanyTier,
 	DashboardSummary,
 	DiscoveryRun,
+	PulseFeed,
 	RunSettings,
 	RunSource,
 } from "@/types/vestige";
 import apiClient from "../apiClient";
 
-const getDashboard = () => apiClient.get<DashboardSummary>({ url: "/dashboard" });
+const getDashboard = (params?: { limit?: number; offset?: number }) =>
+	apiClient.get<DashboardSummary>({ url: "/dashboard", params });
+
+const getDashboardFeed = (params?: { limit?: number; offset?: number }) =>
+	apiClient.get<PulseFeed>({ url: "/dashboard/feed", params });
 
 const listCompanies = (params?: {
 	tier?: string;
@@ -92,6 +97,7 @@ const runCompanyAgent = (
 
 export default {
 	getDashboard,
+	getDashboardFeed,
 	listCompanies,
 	getCompany,
 	createCompany,

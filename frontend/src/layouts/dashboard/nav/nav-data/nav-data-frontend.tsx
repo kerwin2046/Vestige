@@ -6,7 +6,7 @@ export const frontendNavData: NavProps["data"] = [
 		name: "Workspace",
 		items: [
 			{
-				title: "Overview",
+				title: "Pulse",
 				path: "/dashboard",
 				icon: <Icon icon="solar:widget-add-bold-duotone" size="22" />,
 			},
