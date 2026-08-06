@@ -231,6 +231,13 @@ export type IntelStream = {
 	signals_today: number;
 	last_signal_at: string | null;
 	activity_updated_at: string | null;
+	activity?: {
+		total_signals: number;
+		new_24h: number;
+		last_signal_at: string | null;
+		active_24h: boolean;
+		activity_level: "quiet" | "low" | "medium" | "high" | string;
+	} | null;
 	created_at: string;
 	updated_at: string;
 };

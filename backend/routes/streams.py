@@ -15,7 +15,9 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 
 
 def _read_stream(stream) -> dict:
-    return IntelStreamRead.model_validate(stream).model_dump(mode="json")
+    payload = IntelStreamRead.model_validate(stream).model_dump(mode="json")
+    payload["activity"] = streams_repo.stream_activity_dict(stream)
+    return payload
 
 
 @router.get("")

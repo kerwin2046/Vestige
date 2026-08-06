@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { ActivitySparkCard } from "../components/activity-spark-card";
 import { RunStatusBadge, formatDateTime } from "../components/run-status";
 import CompanyForm from "./company-form";
 
@@ -88,44 +89,17 @@ function ActivityCell({ company }: { company: Company }) {
 	const total = activity?.signal_count ?? 0;
 	const today = activity?.signals_today ?? 0;
 	const live = Boolean(activity?.active_24h);
-	const lastSeen = relativeTime(activity?.last_signal_at);
-	const fill =
-		total > 0
-			? Math.min(100, Math.round((today / Math.max(total, 1)) * 100) + (today > 0 ? 20 : 0))
-			: 0;
+	const level = !live ? "quiet" : today >= 10 ? "high" : today >= 4 ? "medium" : today >= 1 ? "low" : "quiet";
 
 	return (
-		<div className="flex min-w-[160px] flex-col gap-1.5">
-			<div className="flex items-center gap-2">
-				<span className="relative flex h-2.5 w-2.5">
-					{live ? (
-						<>
-							<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-							<span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-						</>
-					) : (
-						<span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-600" />
-					)}
-				</span>
-				<span className="text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-					{total}
-				</span>
-				<span className="text-[11px] text-slate-400">signals</span>
-				{today > 0 ? (
-					<span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900">
-						+{today} today
-					</span>
-				) : null}
-			</div>
-			<div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-				<div
-					className={`h-full rounded-full transition-all ${live ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
-					style={{ width: `${Math.max(fill, total > 0 ? 8 : 0)}%` }}
-				/>
-			</div>
-			<div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
-				<span>{lastSeen ? `Last signal ${lastSeen}` : "No signals yet"}</span>
-				{activity?.last_run_status ? (
+		<ActivitySparkCard
+			total={total}
+			newCount24h={today}
+			lastSignalAt={activity?.last_signal_at}
+			active24h={live}
+			level={level}
+			runStatus={
+				activity?.last_run_status ? (
 					<Tooltip
 						title={activity.last_run_at ? `Run ${formatDateTime(activity.last_run_at)}` : "Latest run"}
 					>
@@ -133,9 +107,9 @@ function ActivityCell({ company }: { company: Company }) {
 							<RunStatusBadge status={activity.last_run_status as never} />
 						</span>
 					</Tooltip>
-				) : null}
-			</div>
-		</div>
+				) : undefined
+			}
+		/>
 	);
 }
 

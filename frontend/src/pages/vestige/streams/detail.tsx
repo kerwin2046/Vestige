@@ -5,10 +5,83 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Empty, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { ArrowLeft, ExternalLink, Flame, Play, Sparkles } from "lucide-react";
-import { useState } from "react";
+import {
+	ArrowLeft,
+	ExternalLink,
+	Flame,
+	Globe,
+	MessageCircle,
+	Play,
+	Sparkles,
+	Youtube,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ConfidenceBadge, formatDateTime } from "../components/run-status";
+
+type PlatformMeta = {
+	key: string;
+	label: string;
+	colorClass: string;
+	Icon: typeof Globe;
+};
+
+const PLATFORM_META: Record<string, PlatformMeta> = {
+	reddit: {
+		key: "reddit",
+		label: "Reddit",
+		colorClass: "bg-orange-500/10 text-orange-700 border-orange-500/20",
+		Icon: MessageCircle,
+	},
+	linkedin: {
+		key: "linkedin",
+		label: "LinkedIn",
+		colorClass: "bg-sky-500/10 text-sky-700 border-sky-500/20",
+		Icon: Globe,
+	},
+	practicalmachinist: {
+		key: "practicalmachinist",
+		label: "PracticalMachinist",
+		colorClass: "bg-amber-500/10 text-amber-700 border-amber-500/20",
+		Icon: Globe,
+	},
+	bilibili: {
+		key: "bilibili",
+		label: "Bilibili",
+		colorClass: "bg-pink-500/10 text-pink-700 border-pink-500/20",
+		Icon: Youtube,
+	},
+	youtube: {
+		key: "youtube",
+		label: "YouTube",
+		colorClass: "bg-rose-500/10 text-rose-700 border-rose-500/20",
+		Icon: Youtube,
+	},
+	other: {
+		key: "other",
+		label: "Other",
+		colorClass: "bg-slate-500/10 text-slate-700 border-slate-500/20",
+		Icon: Globe,
+	},
+};
+
+function detectPlatform(signal: StreamSignal): PlatformMeta {
+	const domain = (signal.domain || "").toLowerCase();
+	const sourceHint = JSON.stringify(signal.detail || {}).toLowerCase();
+	const pathHint = `${signal.discovery_path || ""} ${signal.collector || ""}`.toLowerCase();
+	const hint = `${domain} ${sourceHint} ${pathHint}`;
+
+	if (hint.includes("reddit.com") || hint.includes("reddit")) return PLATFORM_META.reddit;
+	if (hint.includes("linkedin.com") || hint.includes("linkedin"))
+		return PLATFORM_META.linkedin;
+	if (hint.includes("practicalmachinist.com") || hint.includes("practicalmachinist"))
+		return PLATFORM_META.practicalmachinist;
+	if (hint.includes("bilibili.com") || hint.includes("bilibili"))
+		return PLATFORM_META.bilibili;
+	if (hint.includes("youtube.com") || hint.includes("youtu.be") || hint.includes("youtube"))
+		return PLATFORM_META.youtube;
+	return PLATFORM_META.other;
+}
 
 export default function StreamDetailPage() {
 	const { id = "" } = useParams();
@@ -60,6 +133,16 @@ export default function StreamDetailPage() {
 
 	const stream = streamQuery.data;
 	const signals = signalsQuery.data?.items ?? [];
+	const platformStats = useMemo(() => {
+		const counts = new Map<string, { meta: PlatformMeta; count: number }>();
+		for (const signal of signals) {
+			const meta = detectPlatform(signal);
+			const item = counts.get(meta.key);
+			if (item) item.count += 1;
+			else counts.set(meta.key, { meta, count: 1 });
+		}
+		return [...counts.values()].sort((a, b) => b.count - a.count);
+	}, [signals]);
 
 	const columns: ColumnsType<StreamSignal> = [
 		{
@@ -67,6 +150,20 @@ export default function StreamDetailPage() {
 			key: "title",
 			render: (_, record) => (
 				<div className="min-w-0">
+					<div className="mb-1">
+						{(() => {
+							const platform = detectPlatform(record);
+							const PlatformIcon = platform.Icon;
+							return (
+								<span
+									className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${platform.colorClass}`}
+								>
+									<PlatformIcon className="h-3 w-3" />
+									{platform.label}
+								</span>
+							);
+						})()}
+					</div>
 					<a
 						href={record.url}
 						target="_blank"
@@ -185,6 +282,23 @@ export default function StreamDetailPage() {
 									<span className="text-emerald-600">{stream?.signals_today} today</span>
 								) : null}
 							</div>
+							{platformStats.length > 0 ? (
+								<div className="mt-2 flex flex-wrap gap-1.5">
+									{platformStats.slice(0, 6).map(({ meta, count }) => {
+										const PlatformIcon = meta.Icon;
+										return (
+											<span
+												key={meta.key}
+												className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${meta.colorClass}`}
+											>
+												<PlatformIcon className="h-3 w-3" />
+												{meta.label}
+												<span className="font-mono">{count}</span>
+											</span>
+										);
+									})}
+								</div>
+							) : null}
 						</div>
 					</div>
 				</CardHeader>

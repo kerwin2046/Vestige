@@ -65,7 +65,52 @@ def list_streams(
         stmt = stmt.where(IntelStream.status == status)
     if kind:
         stmt = stmt.where(IntelStream.kind == kind)
-    return list(session.scalars(stmt.order_by(IntelStream.name.asc())))
+    items = list(session.scalars(stmt.order_by(IntelStream.name.asc())))
+    # Big-tech style ops ordering: active now > new_24h > last_seen > total
+    items.sort(
+        key=lambda s: (
+            stream_activity_dict(s)["active_24h"],
+            stream_activity_dict(s)["new_24h"],
+            _as_utc(getattr(s, "last_signal_at", None))
+            or datetime.fromtimestamp(0, tz=timezone.utc),
+            int(getattr(s, "signal_count", 0) or 0),
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def stream_activity_level(new_24h: int, active_24h: bool) -> str:
+    """Discrete state level for UI, avoids fake progress semantics."""
+    if not active_24h:
+        return "quiet"
+    if new_24h >= 10:
+        return "high"
+    if new_24h >= 4:
+        return "medium"
+    if new_24h >= 1:
+        return "low"
+    return "quiet"
+
+
+def stream_activity_dict(stream: IntelStream) -> dict[str, Any]:
+    total = int(getattr(stream, "signal_count", 0) or 0)
+    new_24h = int(getattr(stream, "signals_today", 0) or 0)
+    last_signal_at = getattr(stream, "last_signal_at", None)
+    last_seen = _as_utc(last_signal_at)
+    active_24h = False
+    if last_seen is not None:
+        active_24h = (
+            datetime.now(timezone.utc) - last_seen
+        ).total_seconds() <= 24 * 3600
+    level = stream_activity_level(new_24h, active_24h)
+    return {
+        "total_signals": total,
+        "new_24h": new_24h,
+        "last_signal_at": last_signal_at.isoformat() if last_signal_at else None,
+        "active_24h": active_24h,
+        "activity_level": level,
+    }
 
 
 def get_stream(session: Session, stream_id: str) -> IntelStream | None:
