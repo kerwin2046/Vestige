@@ -1,4 +1,4 @@
-"""Ranked competitive pulse feed (recency × confidence × company weight)."""
+"""Ranked competitive pulse feed (company + industry stream origins)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from models import Company, CompanySignal
+from models import Company, CompanySignal, IntelStream, StreamSignal
 from repositories.signals import _as_utc
 
 
@@ -40,6 +40,11 @@ PRIORITY_WEIGHTS: dict[str, float] = {
     "low": 0.85,
 }
 
+# Market streams get a fixed boost so industry heat surfaces in Pulse.
+STREAM_KIND_WEIGHTS: dict[str, float] = {
+    "market_social": 1.2,
+}
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -54,6 +59,13 @@ def company_weight(company: Company | None) -> float:
     if priority:
         weight *= PRIORITY_WEIGHTS.get(priority, 1.0)
     return weight
+
+
+def stream_weight(stream: IntelStream | None) -> float:
+    if stream is None:
+        return 1.15
+    kind = str(getattr(stream, "kind", "") or "market_social").strip().lower()
+    return STREAM_KIND_WEIGHTS.get(kind, 1.15)
 
 
 def type_weight(source_type: str | None) -> float:
@@ -71,18 +83,94 @@ def recency_weight(seen_at: datetime | None, *, now: datetime | None = None) -> 
     return max(0.05, math.exp(-math.log(2) * age_hours / 12.0))
 
 
+@dataclass
+class PulseItem:
+    """Unified pulse candidate (company or stream origin)."""
+
+    id: str
+    origin: str  # company | stream
+    confidence: float
+    source_type: str
+    last_seen_at: datetime | None
+    first_seen_at: datetime | None
+    url: str
+    canonical_url: str
+    domain: str
+    title: str
+    snippet: str
+    discovery_path: str
+    collector: str
+    detail: dict[str, Any] | None
+    company: Company | None = None
+    company_id: str | None = None
+    stream: IntelStream | None = None
+    stream_id: str | None = None
+
+
+def _from_company(row: CompanySignal) -> PulseItem:
+    return PulseItem(
+        id=row.id,
+        origin="company",
+        confidence=float(row.confidence or 0.0),
+        source_type=row.source_type or "other",
+        last_seen_at=row.last_seen_at,
+        first_seen_at=row.first_seen_at,
+        url=row.url,
+        canonical_url=row.canonical_url,
+        domain=row.domain or "",
+        title=row.title or "",
+        snippet=row.snippet or "",
+        discovery_path=row.discovery_path or "",
+        collector=row.collector or "",
+        detail=row.detail,
+        company=getattr(row, "company", None),
+        company_id=row.company_id,
+    )
+
+
+def _from_stream(row: StreamSignal) -> PulseItem:
+    return PulseItem(
+        id=row.id,
+        origin="stream",
+        confidence=float(row.confidence or 0.0),
+        source_type=row.source_type or "other",
+        last_seen_at=row.last_seen_at,
+        first_seen_at=row.first_seen_at,
+        url=row.url,
+        canonical_url=row.canonical_url,
+        domain=row.domain or "",
+        title=row.title or "",
+        snippet=row.snippet or "",
+        discovery_path=row.discovery_path or "",
+        collector=row.collector or "",
+        detail=row.detail,
+        stream=getattr(row, "stream", None),
+        stream_id=row.stream_id,
+    )
+
+
+def score_item(item: PulseItem, *, now: datetime | None = None) -> float:
+    confidence = max(0.0, min(1.0, item.confidence))
+    entity_w = (
+        stream_weight(item.stream)
+        if item.origin == "stream"
+        else company_weight(item.company)
+    )
+    return (
+        confidence
+        * recency_weight(item.last_seen_at, now=now)
+        * entity_w
+        * type_weight(item.source_type)
+    )
+
+
 def score_signal(
     row: CompanySignal,
     *,
     now: datetime | None = None,
 ) -> float:
-    confidence = max(0.0, min(1.0, float(row.confidence or 0.0)))
-    return (
-        confidence
-        * recency_weight(row.last_seen_at, now=now)
-        * company_weight(getattr(row, "company", None))
-        * type_weight(row.source_type)
-    )
+    """Back-compat for company-only callers."""
+    return score_item(_from_company(row), now=now)
 
 
 def priority_label(confidence: float) -> str:
@@ -110,37 +198,57 @@ def resolve_windows(now: datetime | None = None) -> list[FeedWindow]:
     ]
 
 
-def _load_candidates(
-    session: Session, since: datetime, *, hard_limit: int = 800
-) -> list[CompanySignal]:
-    # SQLite often stores datetimes without tz; compare in naive UTC.
+def _load_candidates(session: Session, since: datetime, *, hard_limit: int = 800) -> list[PulseItem]:
     since_utc = _as_utc(since) or since
     since_naive = since_utc.replace(tzinfo=None)
-    return list(
+    half = max(1, hard_limit // 2)
+
+    company_rows = list(
         session.scalars(
             select(CompanySignal)
             .options(joinedload(CompanySignal.company))
             .where(CompanySignal.last_seen_at >= since_naive)
             .order_by(CompanySignal.last_seen_at.desc())
-            .limit(hard_limit)
+            .limit(half)
         ).unique()
     )
+    stream_rows = list(
+        session.scalars(
+            select(StreamSignal)
+            .options(joinedload(StreamSignal.stream))
+            .where(StreamSignal.last_seen_at >= since_naive)
+            .order_by(StreamSignal.last_seen_at.desc())
+            .limit(half)
+        ).unique()
+    )
+    items = [_from_company(r) for r in company_rows] + [
+        _from_stream(r) for r in stream_rows
+    ]
+    items.sort(
+        key=lambda item: _as_utc(item.last_seen_at) or since_utc,
+        reverse=True,
+    )
+    return items[:hard_limit]
 
 
 def _rank(
-    rows: list[CompanySignal],
+    rows: list[PulseItem],
     *,
     now: datetime | None = None,
     min_confidence: float = 0.0,
-) -> list[tuple[CompanySignal, float]]:
+) -> list[tuple[PulseItem, float]]:
     current = now or _now()
-    scored: list[tuple[CompanySignal, float]] = []
+    scored: list[tuple[PulseItem, float]] = []
     for row in rows:
-        conf = float(row.confidence or 0.0)
-        if conf < min_confidence:
+        if row.confidence < min_confidence:
             continue
-        scored.append((row, score_signal(row, now=current)))
-    scored.sort(key=lambda item: (item[1], _as_utc(item[0].last_seen_at) or current), reverse=True)
+        scored.append((row, score_item(row, now=current)))
+    scored.sort(
+        key=lambda pair: (_as_utc(pair[0].last_seen_at) or current, pair[1]),
+        reverse=True,
+    )
+    # Prefer score primary
+    scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored
 
 
@@ -161,7 +269,7 @@ def build_pulse_feed(
 
     windows = resolve_windows(current)
     chosen = windows[0]
-    ranked: list[tuple[CompanySignal, float]] = []
+    ranked: list[tuple[PulseItem, float]] = []
 
     for window in windows:
         candidates = _load_candidates(session, window.since)
@@ -181,7 +289,7 @@ def build_pulse_feed(
     must_see_pairs = [
         (row, score)
         for row, score in ranked
-        if float(row.confidence or 0) >= 0.8
+        if row.confidence >= 0.8
     ][:pin_limit]
     if len(must_see_pairs) < min(3, pin_limit) and ranked:
         must_see_pairs = ranked[:pin_limit]
@@ -193,11 +301,17 @@ def build_pulse_feed(
     total_remainder = len(remainder)
     has_more = offset + limit < total_remainder
 
-    def pack(row: CompanySignal, score: float) -> dict[str, Any]:
+    industry = [
+        (row, score)
+        for row, score in ranked
+        if row.origin == "stream"
+    ][:8]
+
+    def pack(row: PulseItem, score: float) -> dict[str, Any]:
         return {
             "row": row,
             "score": round(score, 4),
-            "priority": priority_label(float(row.confidence or 0)),
+            "priority": priority_label(row.confidence),
         }
 
     return {
@@ -205,6 +319,7 @@ def build_pulse_feed(
         "window_label": chosen.label,
         "must_see": [pack(row, score) for row, score in must_see_pairs],
         "feed": [pack(row, score) for row, score in page],
+        "industry_pulse": [pack(row, score) for row, score in industry],
         "feed_total": total_remainder,
         "offset": offset,
         "limit": limit,

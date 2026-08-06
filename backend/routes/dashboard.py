@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from application.pulse_feed import build_pulse_feed
+from application.pulse_feed import PulseItem, build_pulse_feed
 from database import get_session
-from models import Company, CompanySignal, Run, RunSource, RunStatus
+from models import Company, Run, RunSource, RunStatus
 from repositories import runs
 from repositories import signals as signals_repo
 from responses import success
 from routes.runs import _serialize
-from schemas import CompanyRead, CompanySignalRead
+from schemas import CompanyRead, IntelStreamRead
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -28,16 +28,65 @@ def _start_of_utc_day(now: datetime | None = None) -> datetime:
 
 
 def _serialize_feed_item(
-    row: CompanySignal,
+    item: PulseItem,
     *,
     score: float | None = None,
     priority: str | None = None,
 ) -> dict:
-    payload = CompanySignalRead.model_validate(row).model_dump(mode="json")
-    company = getattr(row, "company", None)
-    payload["company"] = (
-        CompanyRead.model_validate(company).model_dump(mode="json") if company else None
-    )
+    if item.origin == "stream":
+        payload = {
+            "id": item.id,
+            "origin": "stream",
+            "stream_id": item.stream_id,
+            "company_id": None,
+            "url": item.url,
+            "canonical_url": item.canonical_url,
+            "domain": item.domain,
+            "source_type": item.source_type,
+            "ownership": "unknown",
+            "confidence": item.confidence,
+            "title": item.title,
+            "snippet": item.snippet,
+            "discovery_path": item.discovery_path,
+            "collector": item.collector,
+            "detail": item.detail,
+            "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at else None,
+            "last_seen_at": item.last_seen_at.isoformat() if item.last_seen_at else None,
+            "company": None,
+            "stream": (
+                IntelStreamRead.model_validate(item.stream).model_dump(mode="json")
+                if item.stream
+                else None
+            ),
+        }
+    else:
+        # Reconstruct a CompanySignal-shaped payload for back-compat
+        payload = {
+            "id": item.id,
+            "origin": "company",
+            "company_id": item.company_id,
+            "stream_id": None,
+            "url": item.url,
+            "canonical_url": item.canonical_url,
+            "domain": item.domain,
+            "source_type": item.source_type,
+            "ownership": "unknown",
+            "confidence": item.confidence,
+            "title": item.title,
+            "snippet": item.snippet,
+            "discovery_path": item.discovery_path,
+            "collector": item.collector,
+            "detail": item.detail,
+            "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at else None,
+            "last_seen_at": item.last_seen_at.isoformat() if item.last_seen_at else None,
+            "last_run_id": None,
+            "company": (
+                CompanyRead.model_validate(item.company).model_dump(mode="json")
+                if item.company
+                else None
+            ),
+            "stream": None,
+        }
     if score is not None:
         payload["score"] = score
     if priority is not None:
@@ -56,6 +105,10 @@ def _serialize_pulse(pulse: dict) -> dict:
         "feed": [
             _serialize_feed_item(item["row"], score=item["score"], priority=item["priority"])
             for item in pulse["feed"]
+        ],
+        "industry_pulse": [
+            _serialize_feed_item(item["row"], score=item["score"], priority=item["priority"])
+            for item in pulse.get("industry_pulse", [])
         ],
         "feed_total": pulse["feed_total"],
         "offset": pulse["offset"],
@@ -138,6 +191,7 @@ def dashboard(
             "signal_series": signal_series,
             "top_signal_types": top_signal_types,
             "pulse": pulse,
+            "industry_pulse": pulse.get("industry_pulse", []),
             # Back-compat aliases used by older clients
             "recent_signals": pulse["must_see"] + pulse["feed"],
             "recent_insights": recent_insights,

@@ -11,6 +11,11 @@ export const frontendNavData: NavProps["data"] = [
 				icon: <Icon icon="solar:widget-add-bold-duotone" size="22" />,
 			},
 			{
+				title: "Streams",
+				path: "/streams",
+				icon: <Icon icon="solar:flame-bold-duotone" size="22" />,
+			},
+			{
 				title: "Companies",
 				path: "/companies",
 				icon: <Icon icon="solar:buildings-2-bold-duotone" size="22" />,

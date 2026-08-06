@@ -1,4 +1,4 @@
-.PHONY: help up down run api web worker import-output import-intel import-b2b import-competitors sync-companies sync-expomind scaffold-agents run-agent backfill-signals dispatch-signals status logs \
+.PHONY: help up down run api web worker import-output import-intel import-b2b import-competitors sync-companies sync-expomind scaffold-agents run-agent backfill-signals dispatch-signals dispatch-stream migrate-mfg-stream status logs \
 	docker-up docker-up-crawler docker-camofox docker-down docker-check docker-logs
 
 # 全部 Python 代码在 backend/；以前端 frontend/ 对称。
@@ -77,6 +77,22 @@ dispatch-signals:
 		$(if $(LOCAL),--local) \
 		$(if $(TIMEOUT),--timeout $(TIMEOUT))
 
+# 种子 mfg-social stream，并把「通用」信号迁到 stream + 目录隐藏
+migrate-mfg-stream:
+	$(PY) -m scripts.migrate_generic_to_stream $(if $(DRY_RUN),--dry-run)
+
+# 制造业社媒热度 stream agent（独立于公司 collector）
+# 用法: make dispatch-stream
+#       make dispatch-stream WAIT=1 LOCAL=1
+#       make dispatch-stream SCAFFOLD_ONLY=1
+dispatch-stream:
+	$(PY) -m scripts.dispatch_stream \
+		$(if $(SCAFFOLD_ONLY),--scaffold-only) \
+		$(if $(WAIT),--wait) \
+		$(if $(LOCAL),--local) \
+		$(if $(TIMEOUT),--timeout $(TIMEOUT)) \
+		$(if $(THINKING),--thinking "$(THINKING)")
+
 # 通过 OpenClaw CLI 跑某公司 agent（需 gateway；无 gateway 时 LOCAL=1）
 # 用法: make run-agent DOMAIN=xometry.com
 #       make run-agent ID=<uuid> DETACH=1
@@ -116,6 +132,8 @@ help:
 	@echo "  make scaffold-agents   为已有公司生成 OpenClaw agent 目录"
 	@echo "  make backfill-signals  回填 company_signals（历史 signal runs）"
 	@echo "  make dispatch-signals  共享 collector 按队列派发 signals"
+	@echo "  make migrate-mfg-stream 种子 mfg-social 并迁移「通用」"
+	@echo "  make dispatch-stream   制造业社媒热度 stream agent"
 	@echo "  make run-agent DOMAIN=…  调用 OpenClaw 跑该公司 agent（默认共享 collector）"
 	@echo "  make down            停止 Docker 栈"
 	@echo "  make status        检查 SearXNG / Camofox / Cloak"

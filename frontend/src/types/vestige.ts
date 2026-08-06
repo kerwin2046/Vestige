@@ -81,8 +81,27 @@ export type DiscoveryRun = {
 	company: Company;
 };
 
-export type DashboardSignal = CompanySignal & {
+export type DashboardSignal = {
+	id: string;
+	origin?: "company" | "stream" | string;
+	company_id?: string | null;
+	stream_id?: string | null;
+	url: string;
+	canonical_url: string;
+	domain: string;
+	source_type: string;
+	ownership?: string;
+	confidence: number;
+	title: string;
+	snippet: string;
+	discovery_path: string;
+	collector: string;
+	detail: Record<string, unknown> | null;
+	first_seen_at: string;
+	last_seen_at: string;
+	last_run_id?: string | null;
 	company: Company | null;
+	stream?: IntelStream | null;
 	score?: number;
 	priority?: "High" | "Medium" | "Low" | string;
 };
@@ -106,6 +125,7 @@ export type PulseFeed = {
 	window_label: string;
 	must_see: DashboardSignal[];
 	feed: DashboardSignal[];
+	industry_pulse?: DashboardSignal[];
 	feed_total: number;
 	offset: number;
 	limit: number;
@@ -124,6 +144,7 @@ export type DashboardSummary = {
 	signal_series: SignalSeriesPoint[];
 	top_signal_types: SignalTypeShare[];
 	pulse: PulseFeed;
+	industry_pulse?: DashboardSignal[];
 	recent_signals: DashboardSignal[];
 	recent_insights: DashboardSignal[];
 	recent_runs: DiscoveryRun[];
@@ -194,5 +215,48 @@ export type ChannelStats = {
 	platform_count: number;
 	association_count: number;
 	with_member_directory: number;
+};
+
+export type IntelStream = {
+	id: string;
+	slug: string;
+	name: string;
+	kind: string;
+	status: string;
+	description: string;
+	sources: Record<string, unknown> | unknown[] | null;
+	collector: string;
+	agent_slug: string;
+	signal_count: number;
+	signals_today: number;
+	last_signal_at: string | null;
+	activity_updated_at: string | null;
+	created_at: string;
+	updated_at: string;
+};
+
+export type StreamSignal = {
+	id: string;
+	stream_id: string;
+	url: string;
+	canonical_url: string;
+	domain: string;
+	source_type: string;
+	ownership: string;
+	confidence: number;
+	title: string;
+	snippet: string;
+	discovery_path: string;
+	collector: string;
+	detail: Record<string, unknown> | null;
+	first_seen_at: string;
+	last_seen_at: string;
+};
+
+export type StreamSignalsPage = {
+	items: StreamSignal[];
+	total: number;
+	limit: number;
+	offset: number;
 };
 

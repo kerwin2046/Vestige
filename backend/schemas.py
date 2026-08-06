@@ -186,3 +186,43 @@ class ChannelRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+class IntelStreamRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    slug: str
+    name: str
+    kind: str
+    status: str
+    description: str = ""
+    sources: dict[str, Any] | list[Any] | None = None
+    collector: str = ""
+    agent_slug: str = ""
+    signal_count: int = 0
+    signals_today: int = 0
+    last_signal_at: datetime | None = None
+    activity_updated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class StreamSignalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    stream_id: str
+    url: str
+    canonical_url: str
+    domain: str
+    source_type: str
+    ownership: str
+    confidence: float
+    title: str
+    snippet: str
+    discovery_path: str
+    collector: str = ""
+    detail: dict[str, Any] | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+

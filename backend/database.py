@@ -53,6 +53,7 @@ def _ensure_sqlite_company_columns(engine: Engine) -> None:
         "last_run_status": "VARCHAR(32)",
         "last_run_at": "DATETIME",
         "activity_updated_at": "DATETIME",
+        "directory_hidden": "INTEGER DEFAULT 0",
     }
     with engine.begin() as conn:
         rows = conn.exec_driver_sql("PRAGMA table_info(companies)").fetchall()
@@ -71,6 +72,10 @@ def _ensure_sqlite_company_columns(engine: Engine) -> None:
         )
         conn.exec_driver_sql(
             "UPDATE companies SET source = 'manual' WHERE source IS NULL OR source = ''"
+        )
+        conn.exec_driver_sql(
+            "UPDATE companies SET directory_hidden = 0 "
+            "WHERE directory_hidden IS NULL"
         )
 
 

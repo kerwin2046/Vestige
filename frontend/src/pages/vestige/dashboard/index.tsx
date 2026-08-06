@@ -158,18 +158,29 @@ function PriorityChip({ level }: { level: "High" | "Medium" | "Low" }) {
 	);
 }
 
+function openPulseEntity(navigate: ReturnType<typeof useNavigate>, item: DashboardSignal) {
+	if (item.origin === "stream") {
+		navigate(`/streams/${item.stream?.slug || item.stream_id || "mfg-social"}`);
+		return;
+	}
+	if (item.company_id) navigate(`/companies/${item.company_id}`);
+}
+
 function SignalRow({
 	item,
 	unread,
-	onOpenCompany,
+	onOpenEntity,
 	onOpenSignal,
 }: {
 	item: DashboardSignal;
 	unread: boolean;
-	onOpenCompany: (id: string) => void;
+	onOpenEntity: (item: DashboardSignal) => void;
 	onOpenSignal: (id: string) => void;
 }) {
-	const companyName = item.company?.name ?? "Unknown company";
+	const isIndustry = item.origin === "stream";
+	const entityName = isIndustry
+		? item.stream?.name ?? "Industry"
+		: item.company?.name ?? "Unknown company";
 	const title = item.title?.trim() || item.url;
 	const priority =
 		(item.priority as "High" | "Medium" | "Low" | undefined) ||
@@ -183,7 +194,7 @@ function SignalRow({
 					.filter(Boolean)
 					.slice(0, 2)
 			: [];
-	const sourceLine = [companyName, item.collector].filter(Boolean).join(" · ");
+	const sourceLine = [entityName, item.collector].filter(Boolean).join(" · ");
 
 	return (
 		<article
@@ -193,21 +204,26 @@ function SignalRow({
 		>
 			<button
 				type="button"
-				onClick={() => onOpenCompany(item.company_id)}
-				className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white shadow-sm ${avatarColor(companyName)}`}
-				title={companyName}
+				onClick={() => onOpenEntity(item)}
+				className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white shadow-sm ${avatarColor(entityName)}`}
+				title={entityName}
 			>
-				{companyName[0]?.toUpperCase() ?? "?"}
+				{isIndustry ? "I" : entityName[0]?.toUpperCase() ?? "?"}
 			</button>
 			<div className="min-w-0 flex-1">
 				<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
 					<button
 						type="button"
-						onClick={() => onOpenCompany(item.company_id)}
+						onClick={() => onOpenEntity(item)}
 						className="text-[11px] font-semibold uppercase tracking-wide text-sky-700 hover:text-sky-800 dark:text-sky-400"
 					>
 						{sourceLine}
 					</button>
+					{isIndustry ? (
+						<span className="rounded-full bg-orange-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+							Industry
+						</span>
+					) : null}
 					{unread ? (
 						<span className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
 							New
@@ -301,6 +317,8 @@ export default function DashboardPage() {
 
 	const mustSee = data?.pulse?.must_see ?? data?.recent_insights ?? [];
 	const baseFeed = data?.pulse?.feed ?? [];
+	const industryPulse =
+		data?.pulse?.industry_pulse ?? data?.industry_pulse ?? [];
 	const feed = useMemo(() => [...baseFeed, ...extraFeed], [baseFeed, extraFeed]);
 	const filterPool = useMemo(() => [...mustSee, ...feed], [mustSee, feed]);
 	const series = data?.signal_series ?? [];
@@ -535,6 +553,52 @@ export default function DashboardPage() {
 				/>
 			</div>
 
+			{industryPulse.length > 0 ? (
+				<Card className="border-orange-200/80 bg-orange-50/40 shadow-xs dark:border-orange-900/50 dark:bg-orange-950/20">
+					<CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-orange-100/80 p-4 dark:border-orange-900/40">
+						<div>
+							<CardTitle className="text-sm font-semibold text-orange-900 dark:text-orange-200">
+								Industry heat
+							</CardTitle>
+							<p className="mt-0.5 text-xs text-orange-800/70 dark:text-orange-300/70">
+								Manufacturing social / community pulse (not company-tied)
+							</p>
+						</div>
+						<Button
+							variant="link"
+							size="sm"
+							className="h-auto p-0 text-orange-700"
+							onClick={() => navigate("/streams/mfg-social")}
+						>
+							Open stream <ArrowRight className="ml-1 h-3.5 w-3.5" />
+						</Button>
+					</CardHeader>
+					<CardContent className="divide-y divide-orange-100/80 p-0 dark:divide-orange-900/40">
+						{industryPulse.slice(0, 5).map((item) => (
+							<button
+								key={`industry-${item.id}`}
+								type="button"
+								className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-orange-100/40 dark:hover:bg-orange-950/40"
+								onClick={() => openPulseEntity(navigate, item)}
+							>
+								<div className="min-w-0 flex-1">
+									<div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+										{item.title || item.url}
+									</div>
+									<div className="mt-0.5 truncate text-[11px] text-slate-500">
+										{item.domain || item.stream?.name || "Industry"} ·{" "}
+										{relativeTime(item.last_seen_at)}
+									</div>
+								</div>
+								<span className="shrink-0 rounded-full bg-orange-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+									Industry
+								</span>
+							</button>
+						))}
+					</CardContent>
+				</Card>
+			) : null}
+
 			<div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
 				<Card className="overflow-hidden border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-800">
 					<CardHeader className="space-y-3 border-b border-slate-100 pb-4 dark:border-slate-800">
@@ -612,7 +676,7 @@ export default function DashboardPage() {
 												key={`must-${item.id}`}
 												item={item}
 												unread={!readIds.has(item.id) && isFresh(item.last_seen_at)}
-												onOpenCompany={(id) => navigate(`/companies/${id}`)}
+												onOpenEntity={(row) => openPulseEntity(navigate, row)}
 												onOpenSignal={markRead}
 											/>
 										))}
@@ -623,7 +687,7 @@ export default function DashboardPage() {
 										key={item.id}
 										item={item}
 										unread={!readIds.has(item.id) && isFresh(item.last_seen_at)}
-										onOpenCompany={(id) => navigate(`/companies/${id}`)}
+										onOpenEntity={(row) => openPulseEntity(navigate, row)}
 										onOpenSignal={markRead}
 									/>
 								))}
@@ -659,14 +723,17 @@ export default function DashboardPage() {
 										key={item.id}
 										type="button"
 										className="flex w-full items-start justify-between gap-3 rounded-xl px-1 py-1 text-left hover:bg-slate-50 dark:hover:bg-slate-900/50"
-										onClick={() => navigate(`/companies/${item.company_id}`)}
+										onClick={() => openPulseEntity(navigate, item)}
 									>
 										<div className="min-w-0">
 											<div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
 												{item.title || item.url}
 											</div>
 											<div className="mt-0.5 truncate text-[11px] text-slate-400">
-												{item.company?.name ?? "Company"} · {relativeTime(item.last_seen_at)}
+												{item.origin === "stream"
+													? item.stream?.name ?? "Industry"
+													: item.company?.name ?? "Company"}{" "}
+												· {relativeTime(item.last_seen_at)}
 											</div>
 										</div>
 										<PriorityChip

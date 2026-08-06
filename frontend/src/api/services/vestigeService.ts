@@ -7,9 +7,11 @@ import type {
 	CompanyTier,
 	DashboardSummary,
 	DiscoveryRun,
+	IntelStream,
 	PulseFeed,
 	RunSettings,
 	RunSource,
+	StreamSignalsPage,
 } from "@/types/vestige";
 import apiClient from "../apiClient";
 
@@ -82,6 +84,48 @@ const listChannels = (params?: {
 
 const getChannelStats = () => apiClient.get<ChannelStats>({ url: "/channels/stats" });
 
+const listStreams = (params?: { status?: string; kind?: string }) =>
+	apiClient.get<IntelStream[]>({ url: "/streams", params });
+
+const getStream = (idOrSlug: string) =>
+	apiClient.get<IntelStream>({ url: `/streams/${idOrSlug}` });
+
+const listStreamSignals = (
+	idOrSlug: string,
+	params?: { limit?: number; offset?: number },
+) =>
+	apiClient.get<StreamSignalsPage>({
+		url: `/streams/${idOrSlug}/signals`,
+		params,
+	});
+
+const scaffoldStreamAgent = (idOrSlug: string) =>
+	apiClient.post<{
+		agent_path: string;
+		slug: string;
+		stream_id: string;
+		stream_slug: string;
+	}>({
+		url: `/streams/${idOrSlug}/scaffold-agent`,
+	});
+
+const runStreamAgent = (
+	idOrSlug: string,
+	params?: { wait?: boolean; local?: boolean; timeout?: number },
+) =>
+	apiClient.post<{
+		status: string;
+		pid?: number | null;
+		log_path: string;
+		agent_path: string;
+		agent_slug?: string;
+		stream_slug?: string;
+		command: string[];
+	}>({
+		url: `/streams/${idOrSlug}/run-agent`,
+		params,
+	});
+
 const scaffoldCompanyAgent = (id: string) =>
 	apiClient.post<{ agent_path: string; slug: string }>({
 		url: `/companies/${id}/scaffold-agent`,
@@ -122,6 +166,11 @@ export default {
 	listCompanySignals,
 	listChannels,
 	getChannelStats,
+	listStreams,
+	getStream,
+	listStreamSignals,
+	scaffoldStreamAgent,
+	runStreamAgent,
 	scaffoldCompanyAgent,
 	runCompanyAgent,
 };

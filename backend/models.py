@@ -58,6 +58,8 @@ class Company(Base):
     activity_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Soft-hide dump entities (e.g. migrated 「通用」) from Company Directory
+    directory_hidden: Mapped[int] = mapped_column(Integer, default=0, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
@@ -218,4 +220,79 @@ class Channel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class IntelStream(Base):
+    """Market / topic lens (not a company). e.g. Manufacturing Social Pulse."""
+
+    __tablename__ = "intel_streams"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    kind: Mapped[str] = mapped_column(String(64), default="market_social", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    sources: Mapped[dict[str, Any] | list[Any] | None] = mapped_column(JSON, nullable=True)
+    collector: Mapped[str] = mapped_column(String(64), default="", index=True)
+    agent_slug: Mapped[str] = mapped_column(String(128), default="")
+    signal_count: Mapped[int] = mapped_column(Integer, default=0)
+    signals_today: Mapped[int] = mapped_column(Integer, default=0)
+    last_signal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    activity_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    signals: Mapped[list["StreamSignal"]] = relationship(
+        back_populates="stream", cascade="all, delete-orphan"
+    )
+
+
+class StreamSignal(Base):
+    """Stream-level signal ledger (upsert by canonical_url)."""
+
+    __tablename__ = "stream_signals"
+    __table_args__ = (
+        UniqueConstraint(
+            "stream_id", "canonical_url", name="uq_stream_signals_stream_url"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    stream_id: Mapped[str] = mapped_column(
+        ForeignKey("intel_streams.id", ondelete="CASCADE"), index=True
+    )
+    url: Mapped[str] = mapped_column(Text)
+    canonical_url: Mapped[str] = mapped_column(Text, index=True)
+    domain: Mapped[str] = mapped_column(String(255), index=True, default="")
+    source_type: Mapped[str] = mapped_column(String(64), index=True, default="other")
+    ownership: Mapped[str] = mapped_column(String(32), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    title: Mapped[str] = mapped_column(Text, default="")
+    snippet: Mapped[str] = mapped_column(Text, default="")
+    discovery_path: Mapped[str] = mapped_column(Text, default="")
+    collector: Mapped[str] = mapped_column(String(64), default="", index=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    stream: Mapped[IntelStream] = relationship(back_populates="signals")
 

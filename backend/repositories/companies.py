@@ -14,8 +14,12 @@ def list_companies(
     role: str | None = None,
     q: str | None = None,
     source: str | None = None,
+    include_hidden: bool = False,
 ) -> list[Company]:
     stmt = select(Company)
+    if not include_hidden:
+        stmt = stmt.where(Company.directory_hidden == 0)
+        stmt = stmt.where(Company.name != "通用")
     if tier:
         stmt = stmt.where(Company.tier == tier)
     if source:
