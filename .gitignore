@@ -22,6 +22,14 @@ output/
 .idea/
 .DS_Store
 
+<<<<<<< HEAD
 Architecture.md
 
 retrieval/
+=======
+output/*
+
+Architecture.md
+
+scripts/*
+>>>>>>> f848b5f (Update project structure and add new frontend components)
